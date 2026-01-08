@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高级磨砂玻璃效果 - SmartMold</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        /* ========== 背景容器 ========== */
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            position: relative;
+        }
+
+        /* 背景模糊层 - 注塑机细节 */
+        .background-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            overflow: hidden;
+        }
+
+        /* 注塑机背景 - 工业感，但低饱和度 */
+        .injector-background {
+            width: 100%;
+            height: 100%;
+            background: 
+                /* 主体阴影 */
+                radial-gradient(ellipse 800px 400px at 30% 50%, rgba(100, 150, 200, 0.15), transparent 60%),
+                /* 机械纹理 */
+                repeating-linear-gradient(
+                    90deg,
+                    transparent,
+                    transparent 60px,
+                    rgba(200, 200, 200, 0.02) 60px,
+                    rgba(200, 200, 200, 0.02) 70px
+                ),
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 40px,
+                    rgba(150, 150, 150, 0.02) 40px,
+                    rgba(150, 150, 150, 0.02) 45px
+                ),
+                /* 工业灯光 */
+                radial-gradient(circle at 80% 20%, rgba(255, 200, 100, 0.08), transparent 40%),
+                radial-gradient(circle at 20% 80%, rgba(100, 150, 200, 0.08), transparent 40%);
+            filter: blur(40px);
+        }
+
+        /* 前景装饰 - 制造业元素，模糊处理 */
+        .foreground-elements {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            filter: blur(25px);
+            opacity: 0.4;
+        }
+
+        .element {
+            position: absolute;
+            background: linear-gradient(135deg, rgba(100, 100, 150, 0.3), rgba(80, 120, 180, 0.2));
+            border-radius: 20px;
+        }
+
+        .element-1 {
+            width: 200px;
+            height: 300px;
+            left: 5%;
+            top: 10%;
+            background: linear-gradient(45deg, rgba(100, 130, 180, 0.25), rgba(120, 150, 200, 0.15));
+        }
+
+        .element-2 {
+            width: 150px;
+            height: 400px;
+            right: 10%;
+            top: 5%;
+            background: linear-gradient(-45deg, rgba(90, 120, 170, 0.2), rgba(110, 140, 190, 0.1));
+        }
+
+        .element-3 {
+            width: 300px;
+            height: 200px;
+            left: 50%;
+            bottom: 5%;
+            transform: translateX(-50%);
+            background: linear-gradient(180deg, rgba(100, 140, 190, 0.15), rgba(80, 120, 170, 0.1));
+        }
+
+        /* ========== 玻璃容器 ========== */
+        .glass-container {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+        }
+
+        /* 主玻璃面板 */
+        .glass-panel {
+            position: relative;
+            width: 500px;
+            height: 600px;
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 30px;
+            padding: 40px;
+            overflow: hidden;
+            box-shadow: 
+                /* 外层阴影 - 深度感 */
+                0 20px 60px rgba(0, 0, 0, 0.4),
+                /* 内层阴影 - 厚度感 */
+                inset 0 1px 0 rgba(255, 255, 255, 0.6),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+                /* 边缘反光 */
+                inset -2px -2px 8px rgba(255, 255, 255, 0.2),
+                inset 2px 2px 8px rgba(0, 0, 0, 0.1);
+            animation: float 6s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% {
+                transform: translate(-50%, -50%) translateY(0);
+            }
+            50% {
+                transform: translate(-50%, -50%) translateY(-10px);
+            }
+        }
+
+        /* 玻璃边缘高光 */
+        .glass-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(
+                90deg,
+                rgba(255, 255, 255, 0),
+                rgba(255, 255, 255, 0.8),
+                rgba(255, 255, 255, 0)
+            );
+            border-radius: 30px 30px 0 0;
+            z-index: 10;
+        }
+
+        /* 玻璃内层内容 */
+        .glass-content {
+            position: relative;
+            z-index: 5;
+            color: rgba(20, 30, 60, 0.9);
+            text-shadow: 0 1px 2px rgba(255, 255, 255, 0.5);
+        }
+
+        .glass-content h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #1a4d7a, #2d6a8f);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .glass-content h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 12px;
+            color: #2d5f8f;
+        }
+
+        .glass-content p {
+            font-size: 14px;
+            line-height: 1.6;
+            color: rgba(20, 30, 60, 0.8);
+            margin-bottom: 12px;
+        }
+
+        .glass-content ul {
+            margin-left: 20px;
+            margin-bottom: 16px;
+        }
+
+        .glass-content li {
+            font-size: 14px;
+            color: rgba(20, 30, 60, 0.8);
+            margin-bottom: 8px;
+        }
+
+        /* 玻璃边框 - 厚度感 */
+        .glass-border-effect {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 30px;
+            pointer-events: none;
+            box-shadow: 
+                /* 玻璃厚度 - 边缘阴影 */
+                inset 0 0 20px rgba(0, 0, 0, 0.05),
+                inset 0 0 40px rgba(255, 255, 255, 0.1);
+        }
+
+        /* ========== 左侧玻璃 - 超透明 ========== */
+        .glass-left {
+            position: fixed;
+            left: 50px;
+            top: 50px;
+            width: 320px;
+            height: 400px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 25px;
+            padding: 30px;
+            box-shadow: 
+                0 15px 40px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+            z-index: 50;
+        }
+
+        .glass-left::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1.5px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0));
+            border-radius: 25px 25px 0 0;
+        }
+
+        /* ========== 右侧玻璃 - 标准透明 ========== */
+        .glass-right {
+            position: fixed;
+            right: 50px;
+            bottom: 50px;
+            width: 380px;
+            height: 350px;
+            background: rgba(255, 255, 255, 0.28);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: 28px;
+            padding: 35px;
+            box-shadow: 
+                0 18px 50px rgba(0, 0, 0, 0.35),
+                inset 0 1px 0 rgba(255, 255, 255, 0.55),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+            z-index: 50;
+        }
+
+        .glass-right::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1.5px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0));
+            border-radius: 28px 28px 0 0;
+        }
+
+        /* 玻璃内容 */
+        .glass-text {
+            position: relative;
+            z-index: 5;
+            color: rgba(30, 40, 70, 0.85);
+        }
+
+        .glass-text h3 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: #2d5f8f;
+        }
+
+        .glass-text p {
+            font-size: 13px;
+            line-height: 1.6;
+            color: rgba(30, 40, 70, 0.75);
+        }
+
+        /* ========== 标签 ========== */
+        .label {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: linear-gradient(135deg, rgba(100, 150, 200, 0.6), rgba(80, 120, 180, 0.5));
+            color: white;
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            z-index: 10;
+        }
+
+        /* ========== 响应式 ========== */
+        @media (max-width: 1024px) {
+            .glass-panel {
+                width: 90vw;
+                max-width: 450px;
+                height: auto;
+            }
+
+            .glass-left {
+                position: static;
+                width: 100%;
+                margin: 20px;
+                height: auto;
+            }
+
+            .glass-right {
+                position: static;
+                width: 100%;
+                margin: 20px;
+                height: auto;
+            }
+        }
+
+        /* ========== 深色模式 ========== */
+        .dark-mode {
+            filter: invert(1);
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 200;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            color: white;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s;
+        }
+
+        .theme-toggle:hover {
+            background: rgba(255, 255, 255, 0.4);
+            border-color: rgba(255, 255, 255, 0.6);
+        }
+    </style>
+</head>
+<body>
+    <!-- 背景层 -->
+    <div class="background-layer">
+        <div class="injector-background"></div>
+        <div class="foreground-elements">
+            <div class="element element-1"></div>
+            <div class="element element-2"></div>
+            <div class="element element-3"></div>
+        </div>
+    </div>
+
+    <!-- 中央主玻璃面板 -->
+    <div class="glass-container">
+        <div class="glass-panel">
+            <div class="label">SmartMold Pro</div>
+            <div class="glass-border-effect"></div>
+            
+            <div class="glass-content">
+                <h1>磨砂玻璃效果</h1>
+                
+                <h2>🔬 技术特性</h2>
+                <ul>
+                    <li>真实背景模糊透视</li>
+                    <li>玻璃厚度边缘反光</li>
+                    <li>工业背景设计</li>
+                    <li>高级视觉深度</li>
+                </ul>
+
+                <h2>💎 设计细节</h2>
+                <p>通过多层阴影和高光，实现真实的磨砂玻璃厚度感。边缘反光由内层阴影和渐变高光组成。</p>
+
+                <h2>🎯 应用场景</h2>
+                <p>适用于关键信息展示、设置面板、数据分析等需要突出内容的界面。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 左侧辅助玻璃 -->
+    <div class="glass-left">
+        <div class="label">超透明</div>
+        <div class="glass-border-effect"></div>
+        
+        <div class="glass-text">
+            <h3>45% 透明度</h3>
+            <p>最高的透视感，背景清晰可见。适合导航栏和背景容器。</p>
+            <p style="margin-top: 16px;">高透明度允许用户看到完整的背景内容，同时通过模糊效果保持焦点。</p>
+        </div>
+    </div>
+
+    <!-- 右侧辅助玻璃 -->
+    <div class="glass-right">
+        <div class="label">标准透明</div>
+        <div class="glass-border-effect"></div>
+        
+        <div class="glass-text">
+            <h3>65% 透明度</h3>
+            <p>最平衡的选择。内容清晰，背景可见但足够模糊不分散注意力。</p>
+            <p style="margin-top: 16px;">标准透明度是最常用的配置，适合大多数UI元素。</p>
+        </div>
+    </div>
+
+    <button class="theme-toggle" onclick="toggleTheme()">🌙 深色</button>
+
+    <script>
+        function toggleTheme() {
+            document.body.classList.toggle('dark-mode');
+        }
+    </script>
+</body>
+</html>

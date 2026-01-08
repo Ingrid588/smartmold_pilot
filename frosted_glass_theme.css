@@ -1,0 +1,344 @@
+/* 
+SmartMold Frosted Glass Theme - Global Styles
+Glassmorphism design system for NiceGUI application
+*/
+
+:root {
+    /* Light Mode Colors */
+    --bg-primary: linear-gradient(135deg, #f5f7fa 0%, #e8f0f7 50%, #dde8f5 100%);
+    --bg-secondary: rgba(255, 255, 255, 0.3);
+    --glass-nav: rgba(255, 255, 255, 0.5);
+    --glass-content: rgba(255, 255, 255, 0.35);
+    --text-primary: #1a1a2e;
+    --text-secondary: #666;
+    --border-light: rgba(255, 255, 255, 0.6);
+    --shadow-light: rgba(100, 140, 200, 0.15);
+    
+    /* Dark Mode Colors */
+    --bg-primary-dark: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    --bg-secondary-dark: rgba(255, 255, 255, 0.1);
+    --glass-nav-dark: rgba(255, 255, 255, 0.25);
+    --glass-content-dark: rgba(255, 255, 255, 0.12);
+    --text-primary-dark: white;
+    --text-secondary-dark: rgba(255, 255, 255, 0.7);
+    --border-dark: rgba(255, 255, 255, 0.3);
+    --shadow-dark: rgba(0, 0, 0, 0.4);
+}
+
+/* Body & Background */
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background 0.3s ease, color 0.3s ease;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+body.dark-mode {
+    background: var(--bg-primary-dark);
+    color: var(--text-primary-dark);
+}
+
+/* Glass Panel Base */
+.nicegui-content > * {
+    background: var(--glass-content) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border-light) !important;
+    border-radius: 16px;
+    box-shadow: 
+        0 10px 30px var(--shadow-light),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7),
+        inset -2px -2px 8px rgba(255, 255, 255, 0.25),
+        inset 2px 2px 8px rgba(100, 140, 200, 0.06);
+    transition: all 0.3s ease;
+}
+
+body.dark-mode .nicegui-content > * {
+    background: var(--glass-content-dark) !important;
+    border-color: var(--border-dark) !important;
+    box-shadow: 
+        0 10px 30px var(--shadow-dark),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5),
+        inset -2px -2px 8px rgba(255, 255, 255, 0.12),
+        inset 2px 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Cards */
+.q-card {
+    background: var(--glass-content) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border-light) !important;
+    border-radius: 16px;
+    box-shadow: 
+        0 10px 30px var(--shadow-light),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7),
+        inset -2px -2px 8px rgba(255, 255, 255, 0.25),
+        inset 2px 2px 8px rgba(100, 140, 200, 0.06);
+}
+
+body.dark-mode .q-card {
+    background: var(--glass-content-dark) !important;
+    border-color: var(--border-dark) !important;
+    box-shadow: 
+        0 10px 30px var(--shadow-dark),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5),
+        inset -2px -2px 8px rgba(255, 255, 255, 0.12),
+        inset 2px 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.q-card:hover {
+    box-shadow: 
+        0 12px 35px var(--shadow-light),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7),
+        inset -2px -2px 8px rgba(255, 255, 255, 0.25),
+        inset 2px 2px 8px rgba(100, 140, 200, 0.06);
+    transform: translateY(-2px);
+}
+
+body.dark-mode .q-card:hover {
+    box-shadow: 
+        0 12px 35px var(--shadow-dark),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5),
+        inset -2px -2px 8px rgba(255, 255, 255, 0.12),
+        inset 2px 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Navigation & Headers */
+.q-header, .q-drawer {
+    background: var(--glass-nav) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-light) !important;
+    box-shadow: 
+        0 20px 60px var(--shadow-light),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8),
+        inset -2px -2px 12px rgba(255, 255, 255, 0.4),
+        inset 2px 2px 12px rgba(100, 140, 200, 0.08);
+}
+
+body.dark-mode .q-header,
+body.dark-mode .q-drawer {
+    background: var(--glass-nav-dark) !important;
+    border-color: var(--border-dark) !important;
+    box-shadow: 
+        0 20px 60px var(--shadow-dark),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6),
+        inset -2px -2px 12px rgba(255, 255, 255, 0.2),
+        inset 2px 2px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Buttons */
+.q-btn {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 8px;
+    box-shadow: 
+        0 4px 15px var(--shadow-light),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transition: all 0.3s ease;
+}
+
+.q-btn:hover {
+    box-shadow: 
+        0 6px 20px var(--shadow-light),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transform: translateY(-1px);
+}
+
+body.dark-mode .q-btn {
+    box-shadow: 
+        0 4px 15px var(--shadow-dark),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+body.dark-mode .q-btn:hover {
+    box-shadow: 
+        0 6px 20px var(--shadow-dark),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* Input Fields */
+.q-field__control, .q-input__control {
+    background: rgba(255, 255, 255, 0.2) !important;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid var(--border-light) !important;
+    border-radius: 8px;
+    box-shadow: 
+        inset 0 1px 0 rgba(255, 255, 255, 0.4),
+        inset -1px -1px 4px rgba(255, 255, 255, 0.15);
+}
+
+body.dark-mode .q-field__control,
+body.dark-mode .q-input__control {
+    background: rgba(255, 255, 255, 0.08) !important;
+    border-color: var(--border-dark) !important;
+    box-shadow: 
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        inset -1px -1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* Tables */
+.q-table {
+    background: var(--glass-content) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border-light) !important;
+    border-radius: 12px;
+    box-shadow: 
+        0 10px 30px var(--shadow-light),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+body.dark-mode .q-table {
+    background: var(--glass-content-dark) !important;
+    border-color: var(--border-dark) !important;
+    box-shadow: 
+        0 10px 30px var(--shadow-dark),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.q-table__card {
+    box-shadow: none;
+    background: transparent;
+    border: none;
+}
+
+.q-table th {
+    background: rgba(255, 255, 255, 0.2) !important;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-light);
+}
+
+body.dark-mode .q-table th {
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: var(--text-primary-dark);
+    border-bottom-color: var(--border-dark);
+}
+
+.q-table td {
+    color: var(--text-primary);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+body.dark-mode .q-table td {
+    color: var(--text-primary-dark);
+    border-bottom-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Dialogs & Modals */
+.q-dialog__backdrop {
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(4px);
+}
+
+.q-menu {
+    background: var(--glass-content) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border-light) !important;
+    border-radius: 12px;
+    box-shadow: 
+        0 10px 30px var(--shadow-light),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+body.dark-mode .q-menu {
+    background: var(--glass-content-dark) !important;
+    border-color: var(--border-dark) !important;
+    box-shadow: 
+        0 10px 30px var(--shadow-dark),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* Links & Text */
+a {
+    color: #4CAF50;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+a:hover {
+    color: #5cb85c;
+    text-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
+}
+
+body.dark-mode a {
+    color: #76c776;
+}
+
+body.dark-mode a:hover {
+    color: #8dd98d;
+}
+
+/* Status Badges */
+.badge {
+    background: rgba(76, 175, 80, 0.3) !important;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid rgba(76, 175, 80, 0.5) !important;
+    border-radius: 20px;
+    color: #2e7d32;
+    box-shadow: 
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.badge.error {
+    background: rgba(244, 67, 54, 0.3) !important;
+    border-color: rgba(244, 67, 54, 0.5) !important;
+    color: #c62828;
+}
+
+.badge.warning {
+    background: rgba(255, 152, 0, 0.3) !important;
+    border-color: rgba(255, 152, 0, 0.5) !important;
+    color: #e65100;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(100, 140, 200, 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 140, 200, 0.5);
+}
+
+body.dark-mode ::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+body.dark-mode ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+body.dark-mode ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Animations */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.nicegui-page > * {
+    animation: slideIn 0.3s ease-out;
+}

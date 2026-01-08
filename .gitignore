@@ -39,3 +39,27 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.python-version
+
+# Database
+smartmold.db
+smartmold.db-shm
+smartmold.db-wal
+
+# Generated Reports
+static/*.pdf
+static/*.html
+MIL_Report_*.pdf
+TTI_Report_*.pdf
+debug_report_*.pdf
+test_*.pdf
+
+# Excel Temp Files
+~$*.xlsx

@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glassmorphism 透明度变体 - 完整演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 50%, #eef2ff 100%);
+            min-height: 100vh;
+            color: #334155;
+        }
+
+        /* 装饰球 */
+        .decorative-shape {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(60px);
+            z-index: -1;
+            animation: float 10s infinite ease-in-out;
+        }
+
+        .shape-1 {
+            width: 300px;
+            height: 300px;
+            background: #bae6fd;
+            top: 10%;
+            left: 20%;
+        }
+
+        .shape-2 {
+            width: 250px;
+            height: 250px;
+            background: #ddd6fe;
+            bottom: 15%;
+            right: 20%;
+            animation-delay: -5s;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(0, 30px); }
+        }
+
+        /* ========== 导航栏 - 超透明 (0.35) ========== */
+        .navbar {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.35);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+            padding: 16px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(31, 38, 135, 0.05);
+        }
+
+        .navbar-brand {
+            font-size: 20px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .navbar-items {
+            display: flex;
+            gap: 32px;
+            align-items: center;
+        }
+
+        .nav-item {
+            text-decoration: none;
+            color: #334155;
+            font-weight: 500;
+            transition: color 0.3s;
+            cursor: pointer;
+        }
+
+        .nav-item:hover {
+            color: #10b981;
+        }
+
+        .nav-button {
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .nav-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        /* 主容器 */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 80px;
+        }
+
+        .header h1 {
+            font-size: 48px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            font-size: 18px;
+            color: #64748b;
+        }
+
+        /* ========== 透明度变体 ========== */
+
+        /* 标准透明度 (0.65) - 通用卡片 */
+        .glass-standard {
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+            border-right: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+            border-radius: 20px;
+        }
+
+        /* 高透明度 (0.45) - 背景层/容器 */
+        .glass-light {
+            background: rgba(255, 255, 255, 0.45);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+            border-right: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.04);
+            border-radius: 20px;
+        }
+
+        /* 低透明度 (0.85) - 内容块 */
+        .glass-dark {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.95);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.7);
+            border-right: 1px solid rgba(255, 255, 255, 0.7);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+            border-radius: 20px;
+        }
+
+        /* 超低透明度 (0.95) - 强调卡片 */
+        .glass-opaque {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 1);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.8);
+            border-right: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.12);
+            border-radius: 20px;
+        }
+
+        /* 基础样式 */
+        .glass-panel {
+            padding: 24px;
+            transition: all 0.3s ease;
+        }
+
+        .glass-panel:hover {
+            transform: translateY(-5px);
+        }
+
+        .glass-standard:hover {
+            box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.12);
+            background: rgba(255, 255, 255, 0.75);
+        }
+
+        .glass-light:hover {
+            box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.08);
+            background: rgba(255, 255, 255, 0.55);
+        }
+
+        .glass-dark:hover {
+            box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.14);
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        .glass-opaque:hover {
+            box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.15);
+            background: rgba(255, 255, 255, 0.98);
+        }
+
+        /* 分类区域 */
+        .section {
+            margin-bottom: 80px;
+        }
+
+        .section-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: #0f172a;
+        }
+
+        .section-subtitle {
+            font-size: 14px;
+            color: #64748b;
+            margin-bottom: 24px;
+        }
+
+        .showcase-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .demo-card {
+            position: relative;
+        }
+
+        .transparency-label {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(16, 185, 129, 0.9);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 16px 0 8px 0;
+            color: #0f172a;
+        }
+
+        p {
+            font-size: 14px;
+            opacity: 0.8;
+            line-height: 1.5;
+        }
+
+        .icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+
+        /* 特殊组件 */
+        .special-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 24px;
+        }
+
+        .mini-card {
+            padding: 16px;
+            border-radius: 16px;
+        }
+
+        /* 深色模式 */
+        body.dark-mode {
+            background: linear-gradient(135deg, #020617 0%, #172554 50%, #0f172a 100%);
+            color: #f1f5f9;
+        }
+
+        body.dark-mode .shape-1 {
+            background: rgba(59, 130, 246, 0.2);
+        }
+
+        body.dark-mode .shape-2 {
+            background: rgba(168, 85, 247, 0.2);
+        }
+
+        body.dark-mode .navbar {
+            background: rgba(15, 23, 42, 0.35);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        body.dark-mode .navbar-brand,
+        body.dark-mode h1,
+        body.dark-mode h3,
+        body.dark-mode .section-title {
+            color: #f1f5f9;
+        }
+
+        body.dark-mode .nav-item {
+            color: #cbd5e1;
+        }
+
+        body.dark-mode .glass-standard,
+        body.dark-mode .glass-light,
+        body.dark-mode .glass-dark,
+        body.dark-mode .glass-opaque {
+            background: rgba(15, 23, 42, 0.65);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        body.dark-mode .glass-light {
+            background: rgba(15, 23, 42, 0.45);
+        }
+
+        body.dark-mode .glass-dark {
+            background: rgba(15, 23, 42, 0.85);
+        }
+
+        body.dark-mode .glass-opaque {
+            background: rgba(15, 23, 42, 0.95);
+        }
+
+        /* 主题切换按钮 */
+        .theme-toggle {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            padding: 12px 20px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 24px;
+            cursor: pointer;
+            font-weight: 500;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s;
+            z-index: 100;
+        }
+
+        .theme-toggle:hover {
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        body.dark-mode .theme-toggle {
+            background: rgba(15, 23, 42, 0.8);
+            color: #f1f5f9;
+        }
+
+        /* 对比演示 */
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+        }
+
+        .comparison-item {
+            padding: 20px;
+            border-radius: 16px;
+            text-align: center;
+        }
+
+        .comparison-label {
+            font-size: 12px;
+            font-weight: 600;
+            opacity: 0.7;
+            margin-top: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .navbar {
+                padding: 12px 16px;
+            }
+
+            .navbar-items {
+                gap: 16px;
+                font-size: 14px;
+            }
+
+            .container {
+                padding: 40px 16px;
+            }
+
+            .header h1 {
+                font-size: 32px;
+            }
+
+            .showcase-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .section-title {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="decorative-shape shape-1"></div>
+    <div class="decorative-shape shape-2"></div>
+
+    <!-- 导航栏 - 超透明 (0.35) -->
+    <nav class="navbar glass-panel glass-light">
+        <div class="navbar-brand">🎨 Glassmorphism</div>
+        <div class="navbar-items">
+            <a class="nav-item" href="#standard">标准</a>
+            <a class="nav-item" href="#light">超透明</a>
+            <a class="nav-item" href="#dark">低透明</a>
+            <a class="nav-item" href="#opaque">强调</a>
+            <button class="nav-button" onclick="toggleTheme()">🌙 深色</button>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- 标题 -->
+        <div class="header">
+            <h1>透明度变体演示</h1>
+            <p>不同场景使用不同的透明度，打造完美的视觉层级</p>
+        </div>
+
+        <!-- 标准透明度 (0.65) - 通用卡片 -->
+        <div class="section" id="standard">
+            <div class="section-title">📊 标准透明度 (0.65)</div>
+            <div class="section-subtitle">适用于：内容卡片、主要内容块、对话框等</div>
+            <div class="showcase-grid">
+                <div class="demo-card glass-panel glass-standard">
+                    <div class="transparency-label">65%</div>
+                    <div class="icon">🎵</div>
+                    <h3>音乐播放</h3>
+                    <p>标准透明度最适合主要内容展示，提供良好的可读性和透视感</p>
+                </div>
+                <div class="demo-card glass-panel glass-standard">
+                    <div class="transparency-label">65%</div>
+                    <div class="icon">📱</div>
+                    <h3>产品展示</h3>
+                    <p>在内容卡片中使用，可以看到背景但不会分散注意力</p>
+                </div>
+                <div class="demo-card glass-panel glass-standard">
+                    <div class="transparency-label">65%</div>
+                    <div class="icon">✨</div>
+                    <h3>特性介绍</h3>
+                    <p>提供最平衡的玻璃感和内容可读性的组合方案</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 超透明度 (0.45) - 背景层/容器 -->
+        <div class="section" id="light">
+            <div class="section-title">🌫️ 超透明度 (0.45)</div>
+            <div class="section-subtitle">适用于：导航栏、背景容器、浮层容器等</div>
+            <div class="showcase-grid">
+                <div class="demo-card glass-panel glass-light">
+                    <div class="transparency-label">45%</div>
+                    <div class="icon">🧭</div>
+                    <h3>导航栏</h3>
+                    <p>超透明允许背景完全可见，非常适合顶部导航和浮动元素</p>
+                </div>
+                <div class="demo-card glass-panel glass-light">
+                    <div class="transparency-label">45%</div>
+                    <div class="icon">📦</div>
+                    <h3>容器背景</h3>
+                    <p>用作背景容器时，让内容层更突出，形成清晰的视觉层级</p>
+                </div>
+                <div class="demo-card glass-panel glass-light">
+                    <div class="transparency-label">45%</div>
+                    <div class="icon">🎯</div>
+                    <h3>浮层效果</h3>
+                    <p>高透明度适合需要透视感的浮动元素和背景层设计</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 低透明度 (0.85) - 内容块 -->
+        <div class="section" id="dark">
+            <div class="section-title">🔒 低透明度 (0.85)</div>
+            <div class="section-subtitle">适用于：强调卡片、重要内容、模态框等</div>
+            <div class="showcase-grid">
+                <div class="demo-card glass-panel glass-dark">
+                    <div class="transparency-label">85%</div>
+                    <div class="icon">📌</div>
+                    <h3>强调卡片</h3>
+                    <p>低透明度提供更好的对比度，适合需要强调的重要内容</p>
+                </div>
+                <div class="demo-card glass-panel glass-dark">
+                    <div class="transparency-label">85%</div>
+                    <div class="icon">⚡</div>
+                    <h3>关键信息</h3>
+                    <p>背景模糊效果更明显，提升整个设计的深度感和优雅度</p>
+                </div>
+                <div class="demo-card glass-panel glass-dark">
+                    <div class="transparency-label">85%</div>
+                    <div class="icon">💎</div>
+                    <h3>高级功能</h3>
+                    <p>适合突显品牌价值和高端功能的内容块呈现</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 超低透明度 (0.95) - 强调卡片 -->
+        <div class="section" id="opaque">
+            <div class="section-title">⭐ 超低透明度 (0.95)</div>
+            <div class="section-subtitle">适用于：主要操作、CTA 按钮、弹窗等</div>
+            <div class="showcase-grid">
+                <div class="demo-card glass-panel glass-opaque">
+                    <div class="transparency-label">95%</div>
+                    <div class="icon">🎯</div>
+                    <h3>行动号召</h3>
+                    <p>最不透明的设计，用于需要立即关注的核心内容和操作</p>
+                </div>
+                <div class="demo-card glass-panel glass-opaque">
+                    <div class="transparency-label">95%</div>
+                    <div class="icon">⚙️</div>
+                    <h3>设置面板</h3>
+                    <p>接近不透明，保持玻璃感同时确保内容清晰易读</p>
+                </div>
+                <div class="demo-card glass-panel glass-opaque">
+                    <div class="transparency-label">95%</div>
+                    <div class="icon">📋</div>
+                    <h3>表单页面</h3>
+                    <p>数据输入和关键表单应使用较低透明度以提高可用性</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 透明度对比演示 -->
+        <div class="section">
+            <div class="section-title">🔄 透明度对比</div>
+            <div class="section-subtitle">并排对比所有透明度变体</div>
+            <div class="comparison-grid">
+                <div class="comparison-item glass-panel glass-light">
+                    <div class="icon">1️⃣</div>
+                    <p><strong>45%</strong></p>
+                    <div class="comparison-label">超透明<br/>导航栏</div>
+                </div>
+                <div class="comparison-item glass-panel glass-standard">
+                    <div class="icon">2️⃣</div>
+                    <p><strong>65%</strong></p>
+                    <div class="comparison-label">标准<br/>卡片</div>
+                </div>
+                <div class="comparison-item glass-panel glass-dark">
+                    <div class="icon">3️⃣</div>
+                    <p><strong>85%</strong></p>
+                    <div class="comparison-label">低透明<br/>强调</div>
+                </div>
+                <div class="comparison-item glass-panel glass-opaque">
+                    <div class="icon">4️⃣</div>
+                    <p><strong>95%</strong></p>
+                    <div class="comparison-label">超低透明<br/>突显</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 使用场景建议 -->
+        <div class="section">
+            <div class="section-title">💡 场景建议</div>
+            <div class="special-container">
+                <div class="mini-card glass-panel glass-light">
+                    <h3>🧭 导航栏</h3>
+                    <p><strong>45% 透明度</strong><br/>需要看到背景内容，让用户知道他们在滚动</p>
+                </div>
+                <div class="mini-card glass-panel glass-light">
+                    <h3>📂 侧边栏</h3>
+                    <p><strong>45-55% 透明度</strong><br/>浮在内容上方，但不应该抢焦点</p>
+                </div>
+                <div class="mini-card glass-panel glass-standard">
+                    <h3>📱 内容卡片</h3>
+                    <p><strong>65% 透明度</strong><br/>最平衡的选择，适合大多数卡片和容器</p>
+                </div>
+                <div class="mini-card glass-panel glass-standard">
+                    <h3>🎪 弹出菜单</h3>
+                    <p><strong>60-70% 透明度</strong><br/>清晰的玻璃感同时保持内容可读性</p>
+                </div>
+                <div class="mini-card glass-panel glass-dark">
+                    <h3>📌 强调区域</h3>
+                    <p><strong>80-85% 透明度</strong><br/>需要突显的特殊内容或产品</p>
+                </div>
+                <div class="mini-card glass-panel glass-opaque">
+                    <h3>⚡ 核心操作</h3>
+                    <p><strong>90-95% 透明度</strong><br/>重要操作、表单、需要高对比度的内容</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const isDarkMode = document.body.classList.toggle('dark-mode');
+            const btn = document.querySelector('.nav-button');
+            btn.textContent = isDarkMode ? '☀️ 浅色' : '🌙 深色';
+            localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+        }
+
+        // 恢复用户偏好的主题
+        if (localStorage.getItem('theme') === 'dark') {
+            document.body.classList.add('dark-mode');
+            document.querySelector('.nav-button').textContent = '☀️ 浅色';
+        }
+
+        // 检查系统偏好
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches && !localStorage.getItem('theme')) {
+            document.body.classList.add('dark-mode');
+            document.querySelector('.nav-button').textContent = '☀️ 浅色';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分层磨砂玻璃效果 - SmartMold</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e8f0f7 50%, #dde8f5 100%);
+            position: relative;
+            overflow-x: hidden;
+            color: #333;
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+
+        body.dark-mode {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #f5f7fa;
+        }
+
+        /* 背景工业纹理 */
+        .bg-pattern {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            background: 
+                repeating-linear-gradient(90deg, transparent, transparent 60px, rgba(150, 150, 150, 0.02) 60px, rgba(150, 150, 150, 0.02) 70px),
+                repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(120, 120, 120, 0.02) 40px, rgba(120, 120, 120, 0.02) 45px);
+            filter: blur(30px);
+            opacity: 0.6;
+            transition: opacity 0.3s ease;
+        }
+
+        body.dark-mode .bg-pattern {
+            background: 
+                repeating-linear-gradient(90deg, transparent, transparent 60px, rgba(200, 200, 200, 0.02) 60px, rgba(200, 200, 200, 0.02) 70px),
+                repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(150, 150, 150, 0.02) 40px, rgba(150, 150, 150, 0.02) 45px);
+        }
+
+        .bg-shape-1 {
+            position: fixed;
+            top: 10%;
+            left: 5%;
+            width: 250px;
+            height: 350px;
+            background: linear-gradient(45deg, rgba(100, 150, 200, 0.1), rgba(150, 180, 220, 0.05));
+            border-radius: 20px;
+            filter: blur(20px);
+            opacity: 0.3;
+            z-index: 1;
+            transition: background 0.3s ease;
+        }
+
+        body.dark-mode .bg-shape-1 {
+            background: linear-gradient(45deg, rgba(100, 120, 170, 0.2), rgba(120, 150, 200, 0.1));
+        }
+
+        .bg-shape-2 {
+            position: fixed;
+            bottom: 10%;
+            right: 8%;
+            width: 300px;
+            height: 300px;
+            background: linear-gradient(-45deg, rgba(100, 150, 200, 0.08), rgba(150, 180, 220, 0.04));
+            border-radius: 25px;
+            filter: blur(25px);
+            opacity: 0.2;
+            z-index: 1;
+            transition: background 0.3s ease;
+        }
+
+        body.dark-mode .bg-shape-2 {
+            background: linear-gradient(-45deg, rgba(90, 120, 170, 0.15), rgba(110, 140, 190, 0.08));
+        }
+
+        /* ========== 玻璃面板基础 ========== */
+        .glass {
+            position: relative;
+            border-radius: 20px;
+            border: 1px solid;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .glass::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1.5px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+            border-radius: 20px 20px 0 0;
+            z-index: 10;
+        }
+
+        /* ========== 导航/按钮风格 - 强磨砂 ========== */
+        .glass-nav {
+            background: rgba(255, 255, 255, 0.5);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-color: rgba(255, 255, 255, 0.6);
+            box-shadow: 
+                0 20px 60px rgba(100, 140, 200, 0.15),
+                inset 0 1px 0 rgba(255, 255, 255, 0.8),
+                inset 0 -1px 0 rgba(100, 140, 200, 0.15),
+                inset -2px -2px 12px rgba(255, 255, 255, 0.4),
+                inset 2px 2px 12px rgba(100, 140, 200, 0.08);
+            color: #333;
+        }
+
+        body.dark-mode .glass-nav {
+            background: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.3);
+            box-shadow: 
+                0 20px 60px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.6),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+                inset -2px -2px 8px rgba(255, 255, 255, 0.2),
+                inset 2px 2px 8px rgba(0, 0, 0, 0.1);
+            color: white;
+        }
+
+        .glass-nav-light {
+            background: rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-color: rgba(255, 255, 255, 0.55);
+            box-shadow: 
+                0 15px 40px rgba(100, 140, 200, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.9),
+                inset 0 -1px 0 rgba(100, 140, 200, 0.12),
+                inset -2px -2px 10px rgba(255, 255, 255, 0.35),
+                inset 2px 2px 10px rgba(100, 140, 200, 0.06);
+            color: #333;
+        }
+
+        body.dark-mode .glass-nav-light {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.25);
+            box-shadow: 
+                0 15px 40px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+                inset -2px -2px 8px rgba(255, 255, 255, 0.15),
+                inset 2px 2px 8px rgba(0, 0, 0, 0.08);
+            color: white;
+        }
+
+        /* ========== 内容风格 - 清晰易读 ========== */
+        .glass-content {
+            background: rgba(255, 255, 255, 0.35);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border-color: rgba(255, 255, 255, 0.55);
+            box-shadow: 
+                0 10px 30px rgba(100, 140, 200, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7),
+                inset 0 -1px 0 rgba(100, 140, 200, 0.1),
+                inset -1px -1px 6px rgba(255, 255, 255, 0.3),
+                inset 1px 1px 6px rgba(100, 140, 200, 0.05);
+            color: #333;
+        }
+
+        body.dark-mode .glass-content {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 
+                0 10px 30px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.1),
+                inset -1px -1px 5px rgba(255, 255, 255, 0.12),
+                inset 1px 1px 5px rgba(0, 0, 0, 0.05);
+            color: #f5f7fa;
+        }
+
+        .glass-content:hover {
+            box-shadow: 
+                0 12px 35px rgba(100, 140, 200, 0.15),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7),
+                inset 0 -1px 0 rgba(100, 140, 200, 0.1),
+                inset -1px -1px 6px rgba(255, 255, 255, 0.3),
+                inset 1px 1px 6px rgba(100, 140, 200, 0.05);
+        }
+
+        body.dark-mode .glass-content:hover {
+            box-shadow: 
+                0 12px 35px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.1),
+                inset -1px -1px 5px rgba(255, 255, 255, 0.12),
+                inset 1px 1px 5px rgba(0, 0, 0, 0.05);
+        }
+
+        /* ========== 导航栏 ========== */
+        .navbar {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            padding: 16px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        body.dark-mode .navbar {
+            border-bottom-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode .navbar-brand {
+            color: white;
+        }
+
+        .theme-toggle {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.6);
+            border: none;
+            border-radius: 8px;
+            color: #333;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        body.dark-mode .theme-toggle {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .theme-toggle:hover {
+            background: rgba(255, 255, 255, 0.75);
+        }
+
+        body.dark-mode .theme-toggle:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* ========== 主容器 ========== */
+        .container {
+            position: relative;
+            z-index: 10;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .header {
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 40px;
+            font-weight: bold;
+            color: #1a1a2e;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode .header h1 {
+            color: white;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .header p {
+            font-size: 16px;
+            color: #666;
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode .header p {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* ========== 标签栏 ========== */
+        .tab-bar {
+            margin-bottom: 30px;
+            padding: 20px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.3);
+            border: none;
+            border-radius: 8px;
+            color: #333;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        body.dark-mode .tab-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, #76c776, #5cb85c);
+            color: white;
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+        }
+
+        body.dark-mode .tab-btn.active {
+            background: rgba(76, 175, 80, 0.5);
+        }
+
+        .tab-btn:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        body.dark-mode .tab-btn:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* ========== 内容卡片网格 ========== */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            padding: 24px;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.45);
+            border-radius: 12px;
+            box-shadow: 
+                0 10px 30px rgba(100, 140, 200, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7),
+                inset -2px -2px 8px rgba(255, 255, 255, 0.25),
+                inset 2px 2px 8px rgba(100, 140, 200, 0.06),
+                inset 0 -1px 4px rgba(100, 140, 200, 0.08);
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        body.dark-mode .card {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.18);
+            box-shadow: 
+                0 10px 30px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset -2px -2px 8px rgba(255, 255, 255, 0.12),
+                inset 2px 2px 8px rgba(0, 0, 0, 0.1),
+                inset 0 -1px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        .card:hover {
+            box-shadow: 
+                0 12px 35px rgba(100, 140, 200, 0.15),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7),
+                inset -2px -2px 8px rgba(255, 255, 255, 0.25),
+                inset 2px 2px 8px rgba(100, 140, 200, 0.06),
+                inset 0 -1px 4px rgba(100, 140, 200, 0.08);
+        }
+
+        body.dark-mode .card:hover {
+            box-shadow: 
+                0 12px 35px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset -2px -2px 8px rgba(255, 255, 255, 0.12),
+                inset 2px 2px 8px rgba(0, 0, 0, 0.1),
+                inset 0 -1px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        .card-title {
+            font-size: 12px;
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: rgba(100, 150, 200, 0.6);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        .card-value {
+            font-size: 48px;
+            font-weight: bold;
+            margin: 16px 0;
+            color: #4CAF50;
+            transition: color 0.3s ease;
+        }
+
+        .card-value.blue { 
+            color: #2196F3;
+        }
+
+        .card-value.orange { 
+            color: #FF9800;
+        }
+
+        .card-desc {
+            font-size: 14px;
+            opacity: 0.8;
+            line-height: 1.6;
+            color: #333;
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode .card-desc {
+            color: #f5f7fa;
+        }
+
+        /* ========== 表格 ========== */
+        .table-container {
+            padding: 24px;
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.45);
+            border-radius: 12px;
+            box-shadow: 
+                0 10px 30px rgba(100, 140, 200, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7),
+                inset -2px -2px 8px rgba(255, 255, 255, 0.25),
+                inset 2px 2px 8px rgba(100, 140, 200, 0.06),
+                inset 0 -1px 4px rgba(100, 140, 200, 0.08);
+            transition: all 0.3s ease;
+        }
+
+        body.dark-mode .table-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.18);
+            box-shadow: 
+                0 10px 30px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset -2px -2px 8px rgba(255, 255, 255, 0.12),
+                inset 2px 2px 8px rgba(0, 0, 0, 0.1),
+                inset 0 -1px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        .table-container h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #1a4d7a;
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode .table-container h2 {
+            color: #88c7ff;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px;
+            font-weight: 600;
+            border-bottom: 2px solid rgba(0, 0, 0, 0.1);
+            color: #333;
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode th {
+            border-bottom-color: rgba(255, 255, 255, 0.1);
+            color: #f5f7fa;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            color: #333;
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode td {
+            border-bottom-color: rgba(255, 255, 255, 0.05);
+            color: #f5f7fa;
+        }
+
+        .status-badge {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* ========== 对比说明 ========== */
+        .comparison {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-top: 60px;
+        }
+
+        .comparison .card {
+            text-align: left;
+        }
+
+        .comparison h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #1a4d7a;
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode .comparison h3 {
+            color: #88c7ff;
+        }
+
+        .comparison ul {
+            font-size: 14px;
+            line-height: 1.8;
+            padding-left: 20px;
+            color: #333;
+            transition: color 0.3s ease;
+        }
+
+        body.dark-mode .comparison ul {
+            color: #f5f7fa;
+        }
+
+        .comparison li {
+            margin-bottom: 8px;
+        }
+
+        /* ========== 响应式 ========== */
+        @media (max-width: 768px) {
+            .navbar {
+                padding: 12px 16px;
+            }
+
+            .header h1 {
+                font-size: 28px;
+            }
+
+            .container {
+                padding: 24px 12px;
+            }
+
+            .card-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 背景 -->
+    <div class="bg-pattern"></div>
+    <div class="bg-shape-1"></div>
+    <div class="bg-shape-2"></div>
+
+    <!-- 导航栏 - 强磨砂 -->
+    <nav class="glass glass-nav navbar">
+        <div class="navbar-brand">
+            🏭 SmartMold Pro
+        </div>
+        <button class="theme-toggle" onclick="toggleTheme()">🌙 深色</button>
+    </nav>
+
+    <!-- 主容器 -->
+    <div class="container">
+        <!-- 标题 -->
+        <div class="header">
+            <h1>分层玻璃效果演示</h1>
+            <p>导航/按钮使用强磨砂质感 | 正文内容清晰易读</p>
+        </div>
+
+        <!-- 标签栏 - 磨砂质感强 -->
+        <div class="glass glass-nav-light tab-bar">
+            <button class="tab-btn active" onclick="switchTab('dashboard')">📊 仪表盘</button>
+            <button class="tab-btn" onclick="switchTab('params')">⚙️ 参数设置</button>
+            <button class="tab-btn" onclick="switchTab('alarms')">⚠️ 报警管理</button>
+            <button class="tab-btn" onclick="switchTab('analytics')">📈 数据分析</button>
+        </div>
+
+        <!-- 内容区域 - 正文清晰 -->
+        <div id="dashboard" class="tab-content">
+            <div class="card-grid">
+                <div class="glass glass-content card">
+                    <div class="card-title">实时温度</div>
+                    <div class="card-value">220°C</div>
+                    <div class="card-desc">
+                        设定值: 220°C<br/>
+                        状态: 正常
+                    </div>
+                </div>
+
+                <div class="glass glass-content card">
+                    <div class="card-title">注射压力</div>
+                    <div class="card-value blue">85 MPa</div>
+                    <div class="card-desc">
+                        最大压力: 100 MPa<br/>
+                        状态: 良好
+                    </div>
+                </div>
+
+                <div class="glass glass-content card">
+                    <div class="card-title">注射速度</div>
+                    <div class="card-value orange">60 mm/s</div>
+                    <div class="card-desc">
+                        设定值: 60 mm/s<br/>
+                        状态: 正常
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="params" class="tab-content" style="display: none;">
+            <div class="glass glass-content table-container">
+                <h2>⚙️ 工艺参数配置</h2>
+                <div class="card-grid">
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">料筒温度 (℃)</label>
+                        <input type="number" value="220" style="width: 100%; padding: 10px; border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 8px; font-size: 14px;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">注射压力 (MPa)</label>
+                        <input type="number" value="85" style="width: 100%; padding: 10px; border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 8px; font-size: 14px;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">冷却时间 (s)</label>
+                        <input type="number" value="25" style="width: 100%; padding: 10px; border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 8px; font-size: 14px;">
+                    </div>
+                </div>
+                <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(0, 0, 0, 0.1);">
+                    <button style="padding: 10px 24px; background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; margin-right: 12px;">💾 保存</button>
+                    <button style="padding: 10px 24px; background: rgba(0, 0, 0, 0.1); color: inherit; border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 8px; font-weight: 600; cursor: pointer;">↺ 重置</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="alarms" class="tab-content" style="display: none;">
+            <div class="glass glass-content table-container">
+                <h2>⚠️ 报警历史</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>报警类型</th>
+                            <th>信息</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>14:30</td>
+                            <td>温度过高</td>
+                            <td>料筒温度超过上限</td>
+                            <td><span class="status-badge">已处理</span></td>
+                        </tr>
+                        <tr>
+                            <td>13:45</td>
+                            <td>压力异常</td>
+                            <td>注射压力波动</td>
+                            <td><span class="status-badge">已处理</span></td>
+                        </tr>
+                        <tr>
+                            <td>12:15</td>
+                            <td>冷却超时</td>
+                            <td>冷却时间过长</td>
+                            <td><span class="status-badge">已处理</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="analytics" class="tab-content" style="display: none;">
+            <div class="glass glass-content table-container">
+                <h2>📈 生产统计</h2>
+                <div class="card-grid">
+                    <div style="padding: 16px; background: rgba(76, 175, 80, 0.1); border-radius: 8px; border: 1px solid rgba(76, 175, 80, 0.3);">
+                        <div style="font-size: 12px; opacity: 0.7; margin-bottom: 8px;">今日产量</div>
+                        <div style="font-size: 28px; font-weight: bold; color: #4CAF50;">2,480</div>
+                        <div style="font-size: 12px; opacity: 0.7; margin-top: 4px;">件 ↑ 5% 环比</div>
+                    </div>
+
+                    <div style="padding: 16px; background: rgba(33, 150, 243, 0.1); border-radius: 8px; border: 1px solid rgba(33, 150, 243, 0.3);">
+                        <div style="font-size: 12px; opacity: 0.7; margin-bottom: 8px;">良品率</div>
+                        <div style="font-size: 28px; font-weight: bold; color: #2196F3;">98.7%</div>
+                        <div style="font-size: 12px; opacity: 0.7; margin-top: 4px;">↑ 0.3% 环比</div>
+                    </div>
+
+                    <div style="padding: 16px; background: rgba(255, 152, 0, 0.1); border-radius: 8px; border: 1px solid rgba(255, 152, 0, 0.3);">
+                        <div style="font-size: 12px; opacity: 0.7; margin-bottom: 8px;">运行时长</div>
+                        <div style="font-size: 28px; font-weight: bold; color: #FF9800;">22.5h</div>
+                        <div style="font-size: 12px; opacity: 0.7; margin-top: 4px;">周期 ↓ 0.2h</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 对比说明 -->
+        <div class="comparison">
+            <div class="glass glass-nav-light card">
+                <h3>🎯 强磨砂质感</h3>
+                <ul>
+                    <li>使用位置：导航栏、标签栏</li>
+                    <li>透明度：15-25%（低透明）</li>
+                    <li>模糊度：10-12px（高模糊）</li>
+                    <li>效果：突出品牌形象</li>
+                </ul>
+            </div>
+
+            <div class="glass glass-content card">
+                <h3>📝 清晰易读</h3>
+                <ul>
+                    <li>使用位置：内容卡片、数据展示</li>
+                    <li>透明度：8-18%（高透明）</li>
+                    <li>模糊度：4-8px（低模糊）</li>
+                    <li>效果：确保文字清晰</li>
+                </ul>
+            </div>
+
+            <div style="background: rgba(255, 255, 255, 0.18); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 20px; padding: 24px;" class="card">
+                <h3>⭐ 平衡方案</h3>
+                <ul>
+                    <li>使用位置：重要信息、关键指标</li>
+                    <li>透明度：18%（中等透明）</li>
+                    <li>模糊度：8px（中等模糊）</li>
+                    <li>效果：兼顾美感和可读性</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tabName) {
+            // 隐藏所有标签页
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.style.display = 'none';
+            });
+            // 显示选中的标签页
+            document.getElementById(tabName).style.display = 'block';
+
+            // 更新按钮状态
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+        }
+
+        function toggleTheme() {
+            const isDark = document.body.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            updateThemeButton();
+        }
+
+        function updateThemeButton() {
+            const btn = document.querySelector('.theme-toggle');
+            if (document.body.classList.contains('dark-mode')) {
+                btn.textContent = '☀️ 浅色';
+            } else {
+                btn.textContent = '🌙 深色';
+            }
+        }
+
+        // 初始化主题
+        const savedTheme = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        
+        if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+            document.body.classList.add('dark-mode');
+        }
+        
+        updateThemeButton();
+    </script>
+</body>
+</html>

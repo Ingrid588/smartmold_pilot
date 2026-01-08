@@ -1,0 +1,370 @@
+{
+  "machine_info": {
+    "brand": "YIZUMI",
+    "model": "UN260EIII",
+    "tonnage": 260,
+    "screw_diameter": 53,
+    "intensification_ratio": 10.5,
+    "max_pressure_bar": 1800,
+    "max_speed_mm_s": 200
+  },
+  "material_info": {
+    "name": "PA6 GF30",
+    "density": 1.36,
+    "melt_temp": 260,
+    "power_law_index": 0.35,
+    "consistency_index": 5000
+  },
+  "step1_viscosity": [
+    {
+      "speed_percent": 10,
+      "speed_mm_s": 20.0,
+      "fill_time": 12.605,
+      "peak_pressure": 6609.7
+    },
+    {
+      "speed_percent": 20,
+      "speed_mm_s": 40.0,
+      "fill_time": 6.166,
+      "peak_pressure": 8311.6
+    },
+    {
+      "speed_percent": 35,
+      "speed_mm_s": 70.0,
+      "fill_time": 3.622,
+      "peak_pressure": 10214.7
+    },
+    {
+      "speed_percent": 50,
+      "speed_mm_s": 100.0,
+      "fill_time": 2.559,
+      "peak_pressure": 11063.9
+    },
+    {
+      "speed_percent": 65,
+      "speed_mm_s": 130.0,
+      "fill_time": 1.914,
+      "peak_pressure": 12010.6
+    },
+    {
+      "speed_percent": 80,
+      "speed_mm_s": 160.0,
+      "fill_time": 1.536,
+      "peak_pressure": 13234.8
+    },
+    {
+      "speed_percent": 95,
+      "speed_mm_s": 190.0,
+      "fill_time": 1.278,
+      "peak_pressure": 13748.2
+    }
+  ],
+  "step2_cavity_balance": {
+    "short_shot": [
+      {
+        "cavity_index": 1,
+        "weight": 6.558,
+        "test_type": "Short_Shot"
+      },
+      {
+        "cavity_index": 2,
+        "weight": 6.518,
+        "test_type": "Short_Shot"
+      },
+      {
+        "cavity_index": 3,
+        "weight": 6.391,
+        "test_type": "Short_Shot"
+      },
+      {
+        "cavity_index": 4,
+        "weight": 6.535,
+        "test_type": "Short_Shot"
+      },
+      {
+        "cavity_index": 5,
+        "weight": 6.621,
+        "test_type": "Short_Shot"
+      },
+      {
+        "cavity_index": 6,
+        "weight": 6.308,
+        "test_type": "Short_Shot"
+      },
+      {
+        "cavity_index": 7,
+        "weight": 6.619,
+        "test_type": "Short_Shot"
+      },
+      {
+        "cavity_index": 8,
+        "weight": 6.577,
+        "test_type": "Short_Shot"
+      }
+    ],
+    "vp_switch": [
+      {
+        "cavity_index": 1,
+        "weight": 12.739,
+        "test_type": "VP_Switch"
+      },
+      {
+        "cavity_index": 2,
+        "weight": 12.668,
+        "test_type": "VP_Switch"
+      },
+      {
+        "cavity_index": 3,
+        "weight": 12.976,
+        "test_type": "VP_Switch"
+      },
+      {
+        "cavity_index": 4,
+        "weight": 12.737,
+        "test_type": "VP_Switch"
+      },
+      {
+        "cavity_index": 5,
+        "weight": 12.644,
+        "test_type": "VP_Switch"
+      },
+      {
+        "cavity_index": 6,
+        "weight": 12.645,
+        "test_type": "VP_Switch"
+      },
+      {
+        "cavity_index": 7,
+        "weight": 12.933,
+        "test_type": "VP_Switch"
+      },
+      {
+        "cavity_index": 8,
+        "weight": 12.84,
+        "test_type": "VP_Switch"
+      }
+    ]
+  },
+  "step3_pressure_drop": [
+    {
+      "position": "Nozzle",
+      "pressure": 1214.7
+    },
+    {
+      "position": "Runner",
+      "pressure": 989.0
+    },
+    {
+      "position": "Gate",
+      "pressure": 751.1
+    },
+    {
+      "position": "Part_50%",
+      "pressure": 529.8
+    },
+    {
+      "position": "Part_99%",
+      "pressure": 278.6
+    }
+  ],
+  "step4_process_window": [
+    {
+      "speed_mm_s": 40,
+      "hold_pressure_bar": 500,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 40,
+      "hold_pressure_bar": 650,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 40,
+      "hold_pressure_bar": 800,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 40,
+      "hold_pressure_bar": 900,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 50,
+      "hold_pressure_bar": 500,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 50,
+      "hold_pressure_bar": 650,
+      "quality": "Pass"
+    },
+    {
+      "speed_mm_s": 50,
+      "hold_pressure_bar": 800,
+      "quality": "Pass"
+    },
+    {
+      "speed_mm_s": 50,
+      "hold_pressure_bar": 900,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 60,
+      "hold_pressure_bar": 500,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 60,
+      "hold_pressure_bar": 650,
+      "quality": "Pass"
+    },
+    {
+      "speed_mm_s": 60,
+      "hold_pressure_bar": 800,
+      "quality": "Pass"
+    },
+    {
+      "speed_mm_s": 60,
+      "hold_pressure_bar": 900,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 70,
+      "hold_pressure_bar": 500,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 70,
+      "hold_pressure_bar": 650,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 70,
+      "hold_pressure_bar": 800,
+      "quality": "Fail"
+    },
+    {
+      "speed_mm_s": 70,
+      "hold_pressure_bar": 900,
+      "quality": "Fail"
+    }
+  ],
+  "step5_gate_freeze": [
+    {
+      "hold_time": 0.5,
+      "weight": 2.68
+    },
+    {
+      "hold_time": 1.0,
+      "weight": 4.743
+    },
+    {
+      "hold_time": 1.5,
+      "weight": 6.762
+    },
+    {
+      "hold_time": 2.0,
+      "weight": 8.844
+    },
+    {
+      "hold_time": 2.5,
+      "weight": 10.832
+    },
+    {
+      "hold_time": 3.0,
+      "weight": 12.903
+    },
+    {
+      "hold_time": 3.5,
+      "weight": 12.733
+    },
+    {
+      "hold_time": 4.0,
+      "weight": 12.78
+    },
+    {
+      "hold_time": 4.5,
+      "weight": 12.796
+    },
+    {
+      "hold_time": 5.0,
+      "weight": 12.742
+    }
+  ],
+  "step6_cooling_time": [
+    {
+      "cooling_time": 5,
+      "part_temp": 165.7,
+      "deformation": 0.586
+    },
+    {
+      "cooling_time": 8,
+      "part_temp": 129.4,
+      "deformation": 0.459
+    },
+    {
+      "cooling_time": 10,
+      "part_temp": 110.8,
+      "deformation": 0.366
+    },
+    {
+      "cooling_time": 12,
+      "part_temp": 94.7,
+      "deformation": 0.296
+    },
+    {
+      "cooling_time": 15,
+      "part_temp": 78.8,
+      "deformation": 0.228
+    },
+    {
+      "cooling_time": 18,
+      "part_temp": 64.1,
+      "deformation": 0.161
+    },
+    {
+      "cooling_time": 20,
+      "part_temp": 57.3,
+      "deformation": 0.132
+    },
+    {
+      "cooling_time": 25,
+      "part_temp": 44.1,
+      "deformation": 0.087
+    }
+  ],
+  "step7_clamping_force": [
+    {
+      "clamping_force": 200,
+      "flash_detected": "Yes"
+    },
+    {
+      "clamping_force": 220,
+      "flash_detected": "Yes"
+    },
+    {
+      "clamping_force": 230,
+      "flash_detected": "Yes"
+    },
+    {
+      "clamping_force": 240,
+      "flash_detected": "Yes"
+    },
+    {
+      "clamping_force": 250,
+      "flash_detected": "No"
+    },
+    {
+      "clamping_force": 260,
+      "flash_detected": "No"
+    },
+    {
+      "clamping_force": 270,
+      "flash_detected": "No"
+    },
+    {
+      "clamping_force": 280,
+      "flash_detected": "No"
+    }
+  ]
+}
