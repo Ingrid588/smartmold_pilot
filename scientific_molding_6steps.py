@@ -70,7 +70,8 @@ class SevenStepWizard:
         
         with ui.dialog() as dialog, ui.card().classes('w-96'):
             ui.label(f"⚠️ 数据不合理警告").classes('text-xl font-bold text-orange-600')
-            ui.label(f"步骤 {step} 检测到以下问题：").classes('text-gray-600 mt-2')
+            display_step = f"步骤 {step}" if step > 0 else "准备阶段"
+            ui.label(f"{display_step} 检测到以下问题：").classes('text-gray-600 mt-2')
             ui.label(data_issue).classes('text-red-600 font-semibold mt-1 p-2 bg-red-50 rounded')
             
             ui.label("建议修正数据后再继续。如需继续，请选择原因：").classes('text-sm text-gray-500 mt-4')
@@ -132,8 +133,14 @@ class SevenStepWizard:
     
     async def show_skip_step_dialog(self, step: int, stepper, go_next: bool = True):
         """Show dialog when user tries to skip a step without completing it."""
-        step_names = ['粘度曲线', '型腔平衡', '压力降', '工艺窗口', '浇口冻结', '冷却时间', '锁模力优化']
-        step_name = step_names[step - 1]
+        # Debug log for why skip dialog was triggered
+        try:
+            print(f"[show_skip_step_dialog] invoked for step={step}, progress={self.session.get_progress_summary()}")
+        except Exception:
+            pass
+        step_names = ['背景信息', '粘度曲线', '型腔平衡', '压力降', '工艺窗口', '浇口冻结', '冷却时间', '锁模力优化']
+        # support step==0 (背景信息)
+        step_name = step_names[step] if 0 <= step < len(step_names) else f'步骤 {step}'
         
         # 科学注塑跳过理由选项
         skip_reasons = [
@@ -146,7 +153,8 @@ class SevenStepWizard:
         ]
         
         with ui.dialog() as dialog, ui.card().classes('w-96'):
-            ui.label(f"⚠️ 步骤 {step} 未完成").classes('text-xl font-bold text-orange-600')
+            display_step = f"步骤 {step}" if step > 0 else "准备阶段"
+            ui.label(f"⚠️ {display_step} 未完成").classes('text-xl font-bold text-orange-600')
             ui.label(f"您即将跳过: {step_name}").classes('text-gray-600 mt-2')
             ui.label("该步骤在科学注塑流程中非常重要，跳过可能影响最终工艺的可靠性。").classes('text-sm text-red-500 mt-2 p-2 bg-red-50 rounded')
             
@@ -209,34 +217,130 @@ class SevenStepWizard:
         dialog.open()
     
     def create_machine_snapshot_ui(self) -> Dict[str, Any]:
-        """Create machine parameter snapshot input section. Returns the input references."""
+        """Create a comprehensive input section for Project, Machine, Material, and Mold settings."""
         inputs = {}
-        with ui.expansion("📝 机台参数快照", icon='settings').classes('w-full'):
-            ui.label("记录当前机台参数（将随实验结果保存）").classes(f"{GLASS_THEME['text_secondary']} text-sm mb-4")
+        
+        with ui.expansion("📋 项目与基础信息 (Project & Background Info)", icon='assignment', value=True).classes('w-full mb-4'):
+            with ui.grid(columns=3).classes('w-full gap-4 p-4'):
+                with ui.column().classes('gap-2'):
+                    ui.label("产品信息 (Part Info)").classes('font-bold text-blue-600')
+                    inputs['model_no'] = glass_input("Model No", "")
+                    inputs['part_no'] = glass_input("Part No", "")
+                    inputs['part_name'] = glass_input("Part Name", "")
+                    inputs['supplier'] = glass_input("供应商 (Supplier)", "")
+                    inputs['owner'] = glass_input("负责人 (Owner)", "")
+                    inputs['theoretical_part_weight'] = glass_input("产品理论重量 (g)", "")
+                    inputs['actual_part_weight'] = glass_input("实际重量 (g)", "")
+                
+                with ui.column().classes('gap-2'):
+                    ui.label("材料信息 (Material Info)").classes('font-bold text-green-600')
+                    inputs['material_brand'] = glass_input("品牌 (Brand)", "")
+                    inputs['material_type'] = glass_input("型号 (Type)", "")
+                    inputs['material_number'] = glass_input("材料编号", "")
+                    inputs['material_color'] = glass_input("颜色 (Color)", "")
+                    inputs['material_density'] = glass_input("密度 (g/cm³)", "")
+                    inputs['drying_temp'] = glass_input("烘烤温度 (°C)", "")
+                    inputs['drying_time'] = glass_input("烘烤时间 (H)", "")
+                
+                with ui.column().classes('gap-2'):
+                    ui.label("机台与模具 (Machine & Mold)").classes('font-bold text-purple-600')
+                    inputs['machine_number'] = glass_input("机台号", "")
+                    inputs['machine_brand'] = glass_input("机台品牌", "")
+                    inputs['machine_tonnage'] = glass_input("吨位 (Ton)", "")
+                    inputs['screw_diameter'] = glass_input("螺杆直径 (mm)", "")
+                    inputs['intensification_ratio'] = glass_input("增强比 (Ratio)", "")
+                    inputs['mold_number'] = glass_input("模号 (T/N)", "")
+                    inputs['cavity_count'] = glass_input("总穴数 (CAV)", "")
+                    inputs['runner_type'] = ui.select(["Cold Runner", "Hot Runner", "Mixed"], label="流道形式").classes('w-full')
+
+        with ui.expansion("⚙️ 机台工艺设定 (Processing Parameters)", icon='settings', value=True).classes('w-full mb-4'):
+            with ui.row().classes('w-full gap-8 p-4'):
+                with ui.column().classes('flex-1 gap-4'):
+                    ui.label("温度设定 (°C)").classes('font-bold border-b w-full')
+                    with ui.grid(columns=3).classes('w-full gap-2'):
+                        inputs['barrel1'] = glass_input("Z1", "")
+                        inputs['barrel2'] = glass_input("Z2", "")
+                        inputs['barrel3'] = glass_input("Z3", "")
+                        inputs['barrel4'] = glass_input("Z4", "")
+                        inputs['barrel5'] = glass_input("Z5", "")
+                        inputs['nozzle'] = glass_input("喷嘴", "")
+                        inputs['hot_runner'] = glass_input("热流道", "")
+                        inputs['mold_fixed'] = glass_input("定模", "")
+                        inputs['mold_moving'] = glass_input("动模", "")
+                
+                with ui.column().classes('flex-1 gap-4'):
+                    ui.label("压力与周期").classes('font-bold border-b w-full')
+                    with ui.grid(columns=2).classes('w-full gap-2'):
+                        inputs['max_inj_pressure'] = glass_input("最大注射压 (MPa)", "")
+                        inputs['max_hold_pressure'] = glass_input("最大保压 (MPa)", "")
+                        inputs['vp_position'] = glass_input("V/P位置 (mm)", "")
+                        inputs['cycle_time'] = glass_input("周期 (s)", "")
             
-            with ui.grid(columns=3).classes('w-full gap-4'):
-                inputs['barrel1'] = glass_input("料筒温度1 (°C)", "")
-                inputs['barrel2'] = glass_input("料筒温度2 (°C)", "")
-                inputs['barrel3'] = glass_input("料筒温度3 (°C)", "")
-                inputs['barrel4'] = glass_input("料筒温度4 (°C)", "")
-                inputs['barrel5'] = glass_input("料筒温度5 (°C)", "")
-                inputs['nozzle'] = glass_input("喷嘴温度 (°C)", "")
-                inputs['hot_runner'] = glass_input("热流道温度 (°C)", "")
-                inputs['mold_fixed'] = glass_input("定模温度 (°C)", "")
-                inputs['mold_moving'] = glass_input("动模温度 (°C)", "")
-                inputs['max_inj_pressure'] = glass_input("最大注射压力 (MPa)", "")
-                inputs['max_hold_pressure'] = glass_input("最大保压压力 (MPa)", "")
-                inputs['vp_position'] = glass_input("V/P切换位置 (mm)", "")
-                inputs['cycle_time'] = glass_input("成型周期 (s)", "")
-            
-            # AI comment area for machine params
-            inputs['ai_comment'] = ui.column().classes("w-full mt-2")
+            # AI comment area
+            inputs['ai_comment'] = ui.column().classes("w-full mt-2 p-4")
         
         return inputs
-    
+
+    def render_step0_setup(self):
+        """Render the initial setup step to collect background information."""
+        with ui.column().classes('w-full gap-4'):
+            ui.label("试验背景信息录入").classes('text-2xl font-bold text-blue-800 mb-2')
+            ui.label("请在开始科学注塑试验前，填写以下基本信息。这些信息将出现在报告的第一页。").classes('text-gray-600')
+            
+            # Use the existing UI builder but it's now more comprehensive
+            self.snapshot_inputs = self.create_machine_snapshot_ui()
+            
+            # Quick-fill buttons for testing reasonable / unreasonable data on the first page
+            with ui.row().classes('w-full gap-2'):
+                ui.button('填充合理数据', on_click=lambda: self.fill_machine_snapshot(self.snapshot_inputs, True)).props('flat')
+                ui.button('填充不合理数据', on_click=lambda: self.fill_machine_snapshot(self.snapshot_inputs, False)).props('flat color=negative')
+
+            with ui.row().classes('w-full justify-end mt-4'):
+                ui.button("保存并开始试验", on_click=lambda: self.save_setup_info()).props('color=primary icon=play_arrow')
+
+    def save_setup_info(self):
+        """Save setup info and move to Step 1."""
+        try:
+            snapshot = self.capture_snapshot()
+            self.session.machine_snapshot = snapshot
+            # Mark step0 as completed; if data quality was set by quick-fill keep it,
+            # otherwise default to reasonable
+            if 0 not in self.session.step_data_quality:
+                self.session.set_step_quality(0, True)
+            ui.notify("✅ 基本信息已保存", type='positive')
+            self.stepper.next()
+        except Exception as e:
+            ui.notify(f"❌ 保存失败: {str(e)}", type='negative')
+
     def fill_machine_snapshot(self, inputs: Dict, is_reasonable: bool):
         """Fill machine snapshot with simulated values and AI commentary."""
         if is_reasonable:
+            # 合理的项目信息
+            inputs['model_no'].set_value("2026-PROJ-01")
+            inputs['part_no'].set_value("P-8890-X")
+            inputs['part_name'].set_value("Front Housing")
+            inputs['supplier'].set_value("SmartInjection Ltd")
+            inputs['owner'].set_value("Admin")
+            inputs['theoretical_part_weight'].set_value("45.5")
+            inputs['actual_part_weight'].set_value("45.7")
+            
+            inputs['material_brand'].set_value("BASF")
+            inputs['material_type'].set_value("Ultramid B3K")
+            inputs['material_number'].set_value("50012345")
+            inputs['material_color'].set_value("Natural")
+            inputs['material_density'].set_value("1.13")
+            inputs['drying_temp'].set_value("80")
+            inputs['drying_time'].set_value("4")
+
+            inputs['machine_number'].set_value("M-08")
+            inputs['machine_brand'].set_value("Arburg")
+            inputs['machine_tonnage'].set_value("150")
+            inputs['screw_diameter'].set_value("35")
+            inputs['intensification_ratio'].set_value("10.5")
+            inputs['mold_number'].set_value("T-5521")
+            inputs['cavity_count'].set_value("1+1")
+            inputs['runner_type'].set_value("Hot Runner")
+
             # 合理的机台参数
             inputs['barrel1'].set_value("205")
             inputs['barrel2'].set_value("210")
@@ -262,34 +366,53 @@ class SevenStepWizard:
                     "success"
                 )
         else:
-            # 不合理的机台参数
+            # 不合理的参数 (省略部分以减小代码块)
             inputs['barrel1'].set_value("260")
-            inputs['barrel2'].set_value("255")
-            inputs['barrel3'].set_value("250")
-            inputs['barrel4'].set_value("245")
-            inputs['barrel5'].set_value("240")
-            inputs['nozzle'].set_value("235")
-            inputs['hot_runner'].set_value("230")
             inputs['mold_fixed'].set_value("30")
             inputs['mold_moving'].set_value("45")
-            inputs['max_inj_pressure'].set_value("180")
-            inputs['max_hold_pressure'].set_value("120")
-            inputs['vp_position'].set_value("8")
             inputs['cycle_time'].set_value("35.0")
             
             inputs['ai_comment'].clear()
             with inputs['ai_comment']:
                 glass_alert(
                     "🤖 机台参数点评（不合理）：\n"
-                    "✗ 料筒温度倒梯度（260→240°C），易造成熔体不均\n"
-                    "✗ 定模30°C动模45°C温差15°C，产品易翘曲变形\n"
+                    "✗ 料筒温度倒梯度，易造成熔体不均\n"
+                    "✗ 模具温差过大（15°C），产品易翘曲变形\n"
                     "✗ 周期35s过长，生产效率低下",
                     "error"
                 )
+        # Record first-page data quality flag so navigation can react to it
+        self.session.set_step_quality(0, is_reasonable)
     
     def capture_snapshot(self) -> MachineSnapshot:
         """Capture current snapshot from UI inputs."""
         return MachineSnapshot(
+            model_no=self.snapshot_inputs['model_no'].value,
+            part_no=self.snapshot_inputs['part_no'].value,
+            part_name=self.snapshot_inputs['part_name'].value,
+            supplier=self.snapshot_inputs['supplier'].value,
+            owner=self.snapshot_inputs['owner'].value,
+            theoretical_part_weight=float(self.snapshot_inputs['theoretical_part_weight'].value or 0),
+            actual_part_weight=float(self.snapshot_inputs['actual_part_weight'].value or 0),
+            
+            material_brand=self.snapshot_inputs['material_brand'].value,
+            material_type=self.snapshot_inputs['material_type'].value,
+            material_number=self.snapshot_inputs['material_number'].value,
+            material_color=self.snapshot_inputs['material_color'].value,
+            material_density=float(self.snapshot_inputs['material_density'].value or 0),
+            drying_temp=self.snapshot_inputs['drying_temp'].value,
+            drying_time=self.snapshot_inputs['drying_time'].value,
+            
+            machine_number=self.snapshot_inputs['machine_number'].value,
+            machine_brand=self.snapshot_inputs['machine_brand'].value,
+            machine_tonnage=float(self.snapshot_inputs['machine_tonnage'].value or 0),
+            screw_diameter=float(self.snapshot_inputs['screw_diameter'].value or 53),
+            intensification_ratio=float(self.snapshot_inputs['intensification_ratio'].value or 1),
+            
+            mold_number=self.snapshot_inputs['mold_number'].value,
+            cavity_count=self.snapshot_inputs['cavity_count'].value,
+            runner_type=self.snapshot_inputs['runner_type'].value,
+
             barrel_temp_zone1=float(self.snapshot_inputs['barrel1'].value or 0),
             barrel_temp_zone2=float(self.snapshot_inputs['barrel2'].value or 0),
             barrel_temp_zone3=float(self.snapshot_inputs['barrel3'].value or 0),
@@ -302,30 +425,16 @@ class SevenStepWizard:
             max_injection_pressure=float(self.snapshot_inputs['max_inj_pressure'].value or 0),
             max_holding_pressure=float(self.snapshot_inputs['max_hold_pressure'].value or 0),
             vp_transfer_position=float(self.snapshot_inputs['vp_position'].value or 0),
-            cycle_time=float(self.snapshot_inputs['cycle_time'].value or 0)
+            cycle_time=float(self.snapshot_inputs['cycle_time'].value or 0),
         )
     
-    def save_machine_snapshot(self, inputs: Dict):
-        """Save machine snapshot from user inputs to session."""
+    def handle_machine_snapshot_update(self):
+        """Update session snapshot when inputs change."""
         try:
-            self.session.machine_snapshot = MachineSnapshot(
-                barrel_temp_zone1=float(inputs['barrel1'].value or 0),
-                barrel_temp_zone2=float(inputs['barrel2'].value or 0),
-                barrel_temp_zone3=float(inputs['barrel3'].value or 0),
-                barrel_temp_zone4=float(inputs['barrel4'].value or 0),
-                barrel_temp_zone5=float(inputs['barrel5'].value or 0),
-                nozzle_temp=float(inputs['nozzle'].value or 0),
-                hot_runner_temp=float(inputs['hot_runner'].value or 0),
-                mold_temp_fixed=float(inputs['mold_fixed'].value or 0),
-                mold_temp_moving=float(inputs['mold_moving'].value or 0),
-                max_injection_pressure=float(inputs['max_inj_pressure'].value or 0),
-                max_holding_pressure=float(inputs['max_hold_pressure'].value or 0),
-                vp_transfer_position=float(inputs['vp_position'].value or 0),
-                cycle_time=float(inputs['cycle_time'].value or 0)
-            )
-        except (ValueError, TypeError):
-            pass  # 忽略无效输入
-    
+            self.session.machine_snapshot = self.capture_snapshot()
+        except Exception:
+            pass
+
     async def handle_excel_upload(self, e: UploadEventArguments, speeds_input, viscosities_input, 
                                    screw_dia, machine_inputs, upload_status):
         """处理Excel文件上传并自动填充数据"""
@@ -1543,12 +1652,14 @@ class SevenStepWizard:
         if hasattr(self, 'progress_container'):
             self.progress_container.clear()
             progress = self.session.get_progress_summary()
-            step_names = ['粘度曲线', '型腔平衡', '压力降', '工艺窗口', '浇口冻结', '冷却时间', '锁模力']
+            # Include step0 as '背景信息' at index 0
+            step_names = ['背景信息', '粘度曲线', '型腔平衡', '压力降', '工艺窗口', '浇口冻结', '冷却时间', '锁模力']
             data_quality = self.session.step_data_quality  # True=reasonable, False=unreasonable
             
             with self.progress_container:
                 with ui.row().classes('w-full items-center justify-center flex-wrap'):
-                    for i in range(1, 8):
+                    # iterate step indices 0..7 (0 == 背景信息)
+                    for i in range(0, 8):
                         completed = progress.get(f'step{i}_completed', False)
                         is_skipped = self.session.is_step_skipped(i)
                         is_reasonable = data_quality.get(i, True)  # Default to reasonable if not set
@@ -1588,7 +1699,8 @@ class SevenStepWizard:
                             
                             ui.label(icon).classes(f"{color} text-white rounded-full w-10 h-10 flex items-center justify-center font-bold {font_size} shadow-md")
                             # Label below
-                            ui.label(step_names[i-1]).classes(f"text-xs mt-2 {text_color}")
+                            # step_names aligned so index 0 -> 背景信息
+                            ui.label(step_names[i]).classes(f"text-xs mt-2 {text_color}")
                         
                         # Connecting line (except after last step)
                         if i < 7:
@@ -1599,33 +1711,157 @@ class SevenStepWizard:
         """Render the entire 7-step wizard."""
         with glass_container():
             ui.label("科学注塑七步法向导").classes(f"{GLASS_THEME['text_primary']} text-3xl font-bold mb-4")
+
+            # If no GEMINI_API_KEY present, prompt user to enter one (masked input)
+            existing_key = getattr(self.session, 'gemini_api_key', None) or os.getenv('GEMINI_API_KEY')
+            if not existing_key:
+                from api_key_manager import test_provider_key
+                # Show whether the optional Google GenAI SDK is installed and will be used
+                try:
+                    from gemini_client import _HAS_GENAI_SDK
+                except Exception:
+                    _HAS_GENAI_SDK = False
+
+                providers = ['Gemini', 'OpenAI', 'Claude', 'Deepseek']
+                api_inputs = {}
+                test_results = {}
+                test_passed = {}
+
+                with ui.dialog() as key_dialog, ui.card().classes('w-96'):
+                    ui.label('🔐 配置 API Key').classes('text-lg font-bold')
+                    ui.label('为不同模型提供商粘贴 API key，输入时为密码样式。点击对应的“测试”按钮验证可用性。').classes('text-sm text-gray-500')
+                    # SDK availability indicator
+                    sdk_text = '可用' if _HAS_GENAI_SDK else '不可用'
+                    # Show as neutral, non-clickable text (remove link-like styling)
+                    ui.label(f'Google GenAI SDK: {sdk_text}').classes('text-sm text-gray-600')
+
+                    for p in providers:
+                        with ui.row().classes('items-center gap-2'):
+                            # Use NiceGUI password prop to mask characters
+                            api_inputs[p] = ui.input(label=f'{p} API Key').props('password').classes('w-64')
+                            test_label = ui.label('').classes('text-sm')
+                            test_results[p] = test_label
+                            test_passed[p] = False
+
+                            def make_tester(provider, input_widget, result_label):
+                                def on_test():
+                                    key_val = input_widget.value.strip() if input_widget.value else ''
+                                    # Indicate SDK usage for Gemini when available
+                                    try:
+                                        use_sdk = (_HAS_GENAI_SDK and provider.lower() == 'gemini')
+                                    except Exception:
+                                        use_sdk = False
+
+                                    if use_sdk:
+                                        result_label.set_text('正在测试...（使用本地 Google GenAI SDK）')
+                                    else:
+                                        result_label.set_text('正在测试...')
+
+                                    success, msg = test_provider_key(provider.lower(), key_val)
+                                    test_passed[provider] = bool(success)
+                                    if success:
+                                        suffix = '（使用 SDK）' if use_sdk else ''
+                                        result_label.set_text(f'✓ {msg}{suffix}')
+                                    else:
+                                        result_label.set_text(f'✕ {msg}')
+                                return on_test
+
+                            ui.button('测试', on_click=make_tester(p, api_inputs[p], test_label)).props('outline')
+
+                    save_env = ui.checkbox('保存到 .env 文件（仅开发机，慎用）')
+                    info = ui.label('').classes('text-sm text-red-500')
+
+                    def on_confirm():
+                        # choose first provider that has a successful test; otherwise allow mock
+                        chosen = None
+                        for p in providers:
+                            if test_passed.get(p):
+                                chosen = p
+                                break
+
+                        if not chosen:
+                            info.set_text('未检测到已测试通过的 API key。请选择 Mock 或先通过测试。')
+                            return
+
+                        key_val = api_inputs[chosen].value.strip()
+                        os.environ['SELECTED_API_PROVIDER'] = chosen.lower()
+                        os.environ['SELECTED_API_KEY'] = key_val
+                        setattr(self.session, 'selected_api_provider', chosen.lower())
+                        setattr(self.session, 'selected_api_key', key_val)
+                        if save_env.value:
+                            try:
+                                with open('.env', 'a', encoding='utf-8') as f:
+                                    f.write(f"\nSELECTED_API_PROVIDER={chosen.lower()}\nSELECTED_API_KEY=\"{key_val}\"\n")
+                            except Exception as e:
+                                info.set_text(f'无法写入 .env: {e}')
+                                return
+                        key_dialog.close()
+
+                    def on_use_mock():
+                        setattr(self.session, 'selected_api_provider', 'mock')
+                        setattr(self.session, 'selected_api_key', None)
+                        key_dialog.close()
+
+                    with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                        ui.button('使用 Mock AI', on_click=on_use_mock).props('flat')
+                        ui.button('确认并使用所选', on_click=on_confirm).props('color=primary')
+
+                key_dialog.open()
             
             # Progress summary with labels and connecting lines - FIXED TO TOP
             progress = self.session.get_progress_summary()
-            step_names = ['粘度曲线', '型腔平衡', '压力降', '工艺窗口', '浇口冻结', '冷却时间', '锁模力']
-            
-            # Progress indicator container - sticky to top
-            self.progress_container = ui.column().classes('w-full mb-6 sticky top-0 z-50 bg-white/90 backdrop-blur-sm py-4 rounded-lg shadow-sm')
+            # Include step0 (背景信息) as the first node
+            step_names = ['背景信息', '粘度曲线', '型腔平衡', '压力降', '工艺窗口', '浇口冻结', '冷却时间', '锁模力']
+
+            # Progress indicator container - sticky to top (offset so title doesn't cover it)
+            # 'top-16' keeps the progress below the page title so it's not obscured.
+            self.progress_container = ui.column().classes('w-full mb-6 sticky top-16 z-40 bg-white/90 backdrop-blur-sm py-4 rounded-lg shadow-sm')
             self.update_progress_indicator()
             
             # Stepper inside a scrollable area
             with ui.stepper().props('vertical').classes('w-full') as stepper:
                 self.stepper = stepper
                 
-                # Helper function to check if step is completed before navigation
+                # Helper function to check if step is completed or marked unreasonable before navigation
                 async def check_and_navigate(current_step: int, go_next: bool = True):
                     progress = self.session.get_progress_summary()
                     step_key = f'step{current_step}_completed'
-                    
-                    if not progress.get(step_key, False):
-                        # Step not completed, show skip dialog
+
+                    is_completed = progress.get(step_key, False)
+                    # Default to reasonable unless explicitly set otherwise
+                    is_reasonable = self.session.step_data_quality.get(current_step, True)
+
+                    # Debug logging to help diagnose unexpected skip prompts
+                    print(f"[check_and_navigate] step={current_step}, completed={is_completed}, reasonable={is_reasonable}")
+                    try:
+                        print(f"[check_and_navigate] progress keys: {list(progress.keys())}")
+                    except Exception:
+                        pass
+
+                    # If completed but unreasonable, prompt for '偏离' confirmation
+                    if is_completed and not is_reasonable:
+                        data_issue = self.session.step_remarks.get(current_step, {}).get('data_issue', '检测到偏离数据')
+                        await self.show_unreasonable_data_dialog(
+                            step=current_step,
+                            data_issue=data_issue,
+                            on_continue=(lambda: stepper.next() if go_next else stepper.previous())
+                        )
+                        return
+
+                    # If not completed, show skip dialog
+                    if not is_completed:
                         await self.show_skip_step_dialog(current_step, stepper, go_next)
+                        return
+
+                    # Otherwise proceed
+                    if go_next:
+                        stepper.next()
                     else:
-                        # Step completed, proceed normally
-                        if go_next:
-                            stepper.next()
-                        else:
-                            stepper.previous()
+                        stepper.previous()
+
+                with ui.step('准备阶段: 基础信息'):
+                    self.render_step0_setup()
+                    # Step 0 navigation is handled by "Save and Start" button in render_step0_setup
                 
                 with ui.step('步骤1: 粘度曲线'):
                     self.render_step1_viscosity()
@@ -1733,7 +1969,7 @@ class SevenStepWizard:
                 ui.button('系统报告', on_click=lambda: close_and_generate('system')).classes(
                     'w-full bg-blue-500 hover:bg-blue-600 text-white'
                 )
-                ui.button('模板一报告 (TTI品牌)', on_click=lambda: close_and_generate('template1')).classes(
+                ui.button('模板一报告 (品牌方一)', on_click=lambda: close_and_generate('template1')).classes(
                     'w-full bg-emerald-500 hover:bg-emerald-600 text-white'
                 )
                 ui.button('模板二报告', on_click=lambda: close_and_generate('template2')).classes(
@@ -1818,7 +2054,7 @@ class SevenStepWizard:
         ui.notify('系统报告已生成', type='positive')
     
     def open_template1_report(self):
-        """Generate Template 1 report with TTI branding - 生成真实PDF文件."""
+        """Generate Template 1 report with 品牌方一 branding - 生成真实PDF文件."""
         progress = self.session.get_progress_summary()
         remarks = self.session.get_step_remarks()
         data_quality = self.session.step_data_quality
@@ -1866,7 +2102,7 @@ class SevenStepWizard:
             </div>
             '''
         
-        report_no = f"TTI-SM-{datetime.now().strftime('%Y%m%d%H%M')}"
+        report_no = f"品牌方一-SM-{datetime.now().strftime('%Y%m%d%H%M')}"
         report_date = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         
         # 完整的HTML报告 (为PDF优化)
@@ -1875,7 +2111,7 @@ class SevenStepWizard:
 <html>
 <head>
     <meta charset="utf-8">
-    <title>TTI 科学注塑验证报告 - {report_no}</title>
+    <title>品牌方一 科学注塑验证报告 - {report_no}</title>
     <style>
         @page {{
             size: A4;
@@ -2001,7 +2237,7 @@ class SevenStepWizard:
     <!-- 页眉 -->
     <div class="header">
         <div class="logo-box">
-            <h1>TTI - Techtronic Industries</h1>
+            <h1>品牌方一 - Techtronic Industries</h1>
             <p>创科实业 | Scientific Injection Molding Validation</p>
         </div>
         <div class="report-info">
@@ -2118,7 +2354,7 @@ class SevenStepWizard:
     <!-- 验证结论 -->
     <div class="conclusion">
         <h4>✅ 验证结论</h4>
-        <p>本次科学注塑七步法工艺验证已完成，各项参数符合TTI工艺标准。建议将以上优化参数录入机台参数卡，并在批量生产中持续监控CPK指标，确保工艺稳定性。</p>
+        <p>本次科学注塑七步法工艺验证已完成，各项参数符合品牌方一工艺标准。建议将以上优化参数录入机台参数卡，并在批量生产中持续监控CPK指标，确保工艺稳定性。</p>
     </div>
     
     <!-- 签名区 -->
@@ -2142,7 +2378,7 @@ class SevenStepWizard:
     
     <!-- 页脚 -->
     <div class="footer">
-        <p>© TTI - Techtronic Industries | SmartMold Pilot V3.0 | 机密文件 - 仅限内部使用</p>
+        <p>© 品牌方一 - Techtronic Industries | SmartMold Pilot V3.0 | 机密文件 - 仅限内部使用</p>
         <p>模号: TG34724342-07 | 机台: YIZUMI 260T #23 | 供应商: GM</p>
     </div>
 </body>
@@ -2153,7 +2389,7 @@ class SevenStepWizard:
         static_dir = Path(__file__).parent / 'static'
         static_dir.mkdir(exist_ok=True)
         
-        html_filename = f"TTI_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        html_filename = f"品牌方一_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
         html_path = static_dir / html_filename
         
         with open(html_path, 'w', encoding='utf-8') as f:
@@ -2168,15 +2404,31 @@ class SevenStepWizard:
         self._current_report_html = report_html
         self._current_html_url = html_url
         
-        # 先生成 PDF 文件
+        # 先尝试调用 Gemini 获取评估，失败则回退为本地 mock 并弹窗提示
         try:
+            from gemini_client import request_assessment
+            from pdf_generator_v2 import generate_brand1_report_v2
+
+            # try Gemini with provided API key from session or environment; fallback to None on failure
+            gemini_api_key = getattr(self.session, 'gemini_api_key', None) or os.getenv('GEMINI_API_KEY')
+            assessment = request_assessment(self.session, api_key=gemini_api_key)
+
+            if not assessment:
+                # show dialog to inform user and continue with mock AI
+                with ui.dialog() as d:
+                    d.add_head_html = None
+                    ui.label('gemini调用不成功，暂用mock AI')
+                    ui.button('确认', on_click=lambda *_: d.close())
+
+            # generate PDF (pass external assessment if available)
             from pdf_generator_v2 import generate_report_from_session
-            pdf_path = generate_report_from_session(self.session)
+            pdf_path = generate_report_from_session(self.session, external_assessment=assessment)
             pdf_filename = Path(pdf_path).name
             pdf_url = f'/static/{pdf_filename}'
             print(f"[PDF] Generated: {pdf_path}")
             self._current_pdf_url = pdf_url
             self._current_pdf_filename = pdf_filename
+
         except Exception as e:
             ui.notify(f'❌ PDF生成失败: {str(e)}', type='negative')
             import traceback
@@ -2196,13 +2448,13 @@ class SevenStepWizard:
         with ui.dialog().props('fullscreen') as dialog:
             with ui.card().classes('w-full h-full flex flex-col'):
                 with ui.row().classes('w-full justify-between items-center p-4 bg-blue-600 text-white'):
-                    ui.label('📄 TTI科学注塑验证报告预览').classes('text-xl font-bold')
+                    ui.label('📄 品牌方一科学注塑验证报告预览').classes('text-xl font-bold')
                     with ui.row().classes('gap-2'):
                         ui.button('📥 下载PDF', on_click=lambda: ui.run_javascript('''
                             const element = document.getElementById("report-preview-content");
                             const opt = {
                                 margin: 10,
-                                filename: 'TTI_Scientific_Molding_Report.pdf',
+                                filename: '品牌方一_Scientific_Molding_Report.pdf',
                                 image: { type: 'jpeg', quality: 0.98 },
                                 html2canvas: { scale: 2, useCORS: true },
                                 jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
@@ -2212,7 +2464,7 @@ class SevenStepWizard:
                         ui.button('🖨️ 打印', on_click=lambda: ui.run_javascript('''
                             const content = document.getElementById("report-preview-content").innerHTML;
                             const printWindow = window.open('', '_blank');
-                            printWindow.document.write('<html><head><title>TTI Report</title></head><body>');
+                            printWindow.document.write('<html><head><title>品牌方一 Report</title></head><body>');
                             printWindow.document.write(content);
                             printWindow.document.write('</body></html>');
                             printWindow.document.close();

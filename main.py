@@ -543,4 +543,6 @@ if __name__ in {"__main__", "__mp_main__"}:
         title="SmartMold Pilot V3",
         dark=False,
         port=9091,
+        show=True,
     )
+    
