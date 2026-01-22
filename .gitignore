@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (track .env for deploy backup; ignore others if any)
-.env
+# env files (WARNING: .env contains API keys - only commit with empty values)
+# Uncomment below to stop tracking .env:
+# .env
 .env.*
 
 # vercel
@@ -61,6 +62,19 @@ Brand1_Report_*.pdf
 品牌方一_Report_*.pdf
 debug_report_*.pdf
 test_*.pdf
+
+# Logs
+*.log
+app.log
+sm.log
+
+# Archives (large backup files)
+*.zip
+*.z01
+*.z02
+*.z03
+*.tar.gz
+*.tar
 
 # Excel Temp Files
 ~$*.xlsx
