@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files (track .env for deploy backup; ignore others if any)
+.env
+.env.*
 
 # vercel
 .vercel
@@ -64,6 +65,4 @@ test_*.pdf
 # Excel Temp Files
 ~$*.xlsx
 
-# Local fonts (large binaries; keep fonts/README.md tracked)
-fonts/*.otf
-fonts/*.ttf
+# Local fonts (now tracked for offline completeness)
