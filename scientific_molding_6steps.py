@@ -14,6 +14,8 @@ Implements sequential wizard-style workflow with data inheritance.
 
 import os
 import io
+import random
+import time
 from pathlib import Path
 from nicegui import ui, app
 from nicegui.events import UploadEventArguments
@@ -40,6 +42,56 @@ import plotly.graph_objects as go
 from typing import Dict, Any, List, Optional
 
 
+def _get_ai_assessment(session, step: Optional[int] = None):
+    """
+    统一的 AI 评估函数，支持多 API 自动故障转移。
+    返回 assessment dict 或 None。
+    """
+    try:
+        from global_state import app_state, get_available_api_sync
+        api_name, api_key = get_available_api_sync()
+        
+        if not api_name or not api_key:
+            print("[AI Assessment] No API available")
+            return None
+        
+        print(f"[AI Assessment] Using {api_name.upper()} API...")
+        
+        if api_name == "gemini":
+            from gemini_client import request_assessment
+            assessment = request_assessment(session, api_key=api_key, focus_step=step)
+        elif api_name in ["openai", "deepseek"]:
+            from openai_client import request_assessment
+            if api_name == "deepseek":
+                print(f"[AI Assessment] Calling DeepSeek API for step {step}...")
+                assessment = request_assessment(session, api_key=api_key, api_url="https://api.deepseek.com", focus_step=step, timeout=60)
+                if assessment is None:
+                    print(f"[AI Assessment] DeepSeek API call returned None for step {step}")
+            else:
+                assessment = request_assessment(session, api_key=api_key, focus_step=step)
+        else:
+            assessment = None
+
+        # Persist successful realtime AI assessments into session for PDF export
+        try:
+            if assessment and hasattr(session, 'set_ai_assessment'):
+                # Use explicit step when provided; fallback to session.current_step
+                if step is None:
+                    step_idx = getattr(session, 'current_step', 0) or 0
+                else:
+                    step_idx = step
+                session.set_ai_assessment(int(step_idx), assessment, provider=api_name)
+        except Exception:
+            pass
+
+        return assessment
+    except Exception as e:
+        print(f"[AI Assessment] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 class SevenStepWizard:
     """Seven-step scientific molding wizard with parameter inheritance."""
     
@@ -63,6 +115,7 @@ class SevenStepWizard:
         # Excel上传数据存储
         self.uploaded_excel_data: Optional[ExcelTestData] = None
         self.excel_upload_status = None  # UI显示区域
+        self.pending_ai: Dict[int, Dict[str, Any]] = {}
     
     async def show_unreasonable_data_dialog(self, step: int, data_issue: str, on_continue: callable):
         """Show dialog for unreasonable data confirmation with remark input."""
@@ -117,7 +170,13 @@ class SevenStepWizard:
                 remark_text = remark_input.value.strip() if remark_input.value else "（无补充说明）"
                 self.session.set_step_remark(step, reason_select.value, remark_text, data_issue)
                 self.unreasonable_steps[step] = data_issue
+                
+                # Update progress indicator BEFORE closing dialog and navigating
+                self.update_progress_indicator()
+                
                 dialog.close()
+                ui.notify(f"步骤 {step} 已记录偏离原因", type='warning')
+                
                 # Handle both sync and async callbacks
                 import asyncio
                 if asyncio.iscoroutinefunction(on_continue):
@@ -132,17 +191,31 @@ class SevenStepWizard:
         dialog.open()
     
     async def show_skip_step_dialog(self, step: int, stepper, go_next: bool = True):
-        """Show dialog when user tries to skip a step without completing it."""
+        """Show dialog when user tries to skip a step without completing it.
+        
+        When 'Use Historical Data' is selected, show data input fields and AI review.
+        """
         # Debug log for why skip dialog was triggered
         try:
             print(f"[show_skip_step_dialog] invoked for step={step}, progress={self.session.get_progress_summary()}")
         except Exception:
             pass
         step_names = ['背景信息', '粘度曲线', '型腔平衡', '压力降', '工艺窗口', '浇口冻结', '冷却时间', '锁模力优化']
-        # support step==0 (背景信息)
         step_name = step_names[step] if 0 <= step < len(step_names) else f'步骤 {step}'
         
-        # 科学注塑跳过理由选项
+        # Historical data field definitions for each step
+        historical_data_fields = {
+            1: [("optimal_speed", "最佳射速 (mm/s)", "例如: 45.5")],
+            2: [("balance_ratio", "型腔平衡比", "例如: 0.97")],
+            3: [("pressure_margin", "压力裕度 (MPa)", "例如: 25")],
+            4: [("process_window_low", "工艺窗口下限 (MPa)", "例如: 40"),
+                ("process_window_high", "工艺窗口上限 (MPa)", "例如: 60")],
+            5: [("gate_freeze_time", "浇口冻结时间 (s)", "例如: 13")],
+            6: [("cooling_time", "推荐冷却时间 (s)", "例如: 15")],
+            7: [("clamping_force", "推荐锁模力 (Ton)", "例如: 138")],
+        }
+        
+        # Skip reasons
         skip_reasons = [
             "该测试已在其他试模中完成",
             "使用历史数据/经验值",
@@ -152,33 +225,140 @@ class SevenStepWizard:
             "其他原因"
         ]
         
-        with ui.dialog() as dialog, ui.card().classes('w-96'):
+        with ui.dialog() as dialog, ui.card().classes('w-[500px]'):
             display_step = f"步骤 {step}" if step > 0 else "准备阶段"
-            ui.label(f"⚠️ {display_step} 未完成").classes('text-xl font-bold text-orange-600')
+            ui.label(f"⏭️ {display_step} 跳过确认").classes('text-xl font-bold text-orange-600')
             ui.label(f"您即将跳过: {step_name}").classes('text-gray-600 mt-2')
             ui.label("该步骤在科学注塑流程中非常重要，跳过可能影响最终工艺的可靠性。").classes('text-sm text-red-500 mt-2 p-2 bg-red-50 rounded')
             
-            ui.label("如需跳过，请选择原因：").classes('text-sm text-gray-500 mt-4')
+            ui.label("请选择跳过原因：").classes('text-sm text-gray-500 mt-4')
             
             reason_select = ui.select(skip_reasons, label="选择跳过原因").classes('w-full')
-            remark_input = ui.textarea(label="补充说明", placeholder="请说明跳过该步骤的具体原因...").classes('w-full')
+            
+            # Container for historical data input (shown only when "使用历史数据/经验值" is selected)
+            historical_data_container = ui.column().classes('w-full mt-2')
+            historical_data_inputs = {}
+            ai_review_container = ui.column().classes('w-full mt-2')
+            
+            remark_label = ui.label("补充说明").classes('text-sm text-gray-600 mt-2')
+            remark_input = ui.textarea(placeholder="请说明跳过该步骤的具体原因...").classes('w-full')
             
             error_label = ui.label("").classes('text-red-500 text-sm')
+            
+            def on_reason_change(e):
+                historical_data_container.clear()
+                ai_review_container.clear()
+                historical_data_inputs.clear()
+                
+                if reason_select.value == "使用历史数据/经验值":
+                    # Show historical data input fields
+                    with historical_data_container:
+                        ui.label("📊 请输入历史数据：").classes('font-semibold text-blue-600 mt-2')
+                        fields = historical_data_fields.get(step, [])
+                        if fields:
+                            with ui.grid(columns=2).classes('w-full gap-2'):
+                                for field_key, field_label, placeholder in fields:
+                                    inp = ui.input(label=field_label, placeholder=placeholder).classes('w-full')
+                                    historical_data_inputs[field_key] = inp
+                        else:
+                            ui.label("此步骤无需额外数据").classes('text-gray-500 text-sm')
+                        
+                        # AI Review button
+                        async def request_ai_review():
+                            ai_review_container.clear()
+                            with ai_review_container:
+                                ui.spinner('dots').classes('mr-2')
+                                ui.label("正在获取AI点评...").classes('text-gray-500')
+                            
+                            # Collect historical data
+                            hist_data = {k: v.value for k, v in historical_data_inputs.items() if v.value}
+                            
+                            # Store historical data to session and trigger AI
+                            self._apply_historical_data_to_session(step, hist_data)
+                            
+                            # Get AI assessment
+                            try:
+                                from global_state import get_available_api_sync
+                                current_api, api_key = get_available_api_sync()
+                                
+                                if current_api and api_key:
+                                    import asyncio
+                                    
+                                    def blocking_api_call():
+                                        if current_api == "openai":
+                                            from openai_client import request_assessment
+                                            return request_assessment(self.session, api_key=api_key, timeout=15, focus_step=step)
+                                        elif current_api == "gemini":
+                                            from gemini_client import request_assessment
+                                            return request_assessment(self.session, api_key=api_key, timeout=15, focus_step=step)
+                                        return None
+                                    
+                                    assessment = await asyncio.get_event_loop().run_in_executor(None, blocking_api_call)
+                                    
+                                    ai_review_container.clear()
+                                    with ai_review_container:
+                                        if assessment and isinstance(assessment, dict):
+                                            # Store AI assessment
+                                            self.session.set_ai_assessment(step, assessment, provider=current_api)
+                                            
+                                            text = self._format_assessment_text(assessment)
+                                            glass_alert(f"🤖 AI点评（{current_api.upper()}）：\n" + text, "success")
+                                            ui.notify("✅ AI点评已获取并保存", type="positive")
+                                        else:
+                                            glass_alert("⚠️ AI点评获取失败，但可以继续", "warning")
+                                else:
+                                    ai_review_container.clear()
+                                    with ai_review_container:
+                                        glass_alert("⚠️ 未配置AI API，跳过AI点评", "warning")
+                            except Exception as ex:
+                                print(f"[Skip Dialog AI] Error: {ex}")
+                                ai_review_container.clear()
+                                with ai_review_container:
+                                    glass_alert(f"⚠️ AI点评出错: {str(ex)[:50]}", "error")
+                        
+                        ui.button("🤖 获取AI点评", on_click=request_ai_review).classes(
+                            'mt-2 bg-blue-500 hover:bg-blue-600 text-white'
+                        )
+                    
+                    remark_label.set_text("数据来源说明（选填）")
+                elif reason_select.value == "其他原因":
+                    remark_label.set_text("补充说明（必填）")
+                    remark_label.classes(remove="text-gray-600", add="text-red-600 font-semibold")
+                else:
+                    remark_label.set_text("补充说明（选填）")
+                    remark_label.classes(remove="text-red-600 font-semibold", add="text-gray-600")
+            
+            reason_select.on('update:model-value', on_reason_change)
             
             async def on_skip():
                 if not reason_select.value:
                     error_label.set_text("请选择跳过原因")
                     return
-                # "其他原因"必须填写备注
+                
+                # Validate based on reason
                 if reason_select.value == "其他原因" and (not remark_input.value or len(remark_input.value.strip()) < 3):
                     error_label.set_text("选择'其他原因'时必须填写补充说明")
                     return
                 
-                # Mark step as skipped with reason
-                self.session.set_step_remark(step, reason_select.value, remark_input.value or "（无补充说明）", "用户跳过该步骤")
-                self.session.set_step_skipped(step, True)  # Mark as skipped
+                if reason_select.value == "使用历史数据/经验值":
+                    # Validate that at least one historical data field is filled
+                    hist_data = {k: v.value for k, v in historical_data_inputs.items() if v.value}
+                    if not hist_data:
+                        error_label.set_text("请至少填写一项历史数据")
+                        return
+                    # Apply historical data to session
+                    self._apply_historical_data_to_session(step, hist_data)
+                    # Mark as completed (with historical data)
+                    self.session.set_step_remark(step, reason_select.value, 
+                                                  f"历史数据: {hist_data}, {remark_input.value or ''}", 
+                                                  "使用历史数据替代实测")
+                else:
+                    # Mark step as skipped with reason
+                    self.session.set_step_remark(step, reason_select.value, remark_input.value or "（无补充说明）", "用户跳过该步骤")
                 
-                # Update progress indicator to show skipped state
+                self.session.set_step_skipped(step, True)
+                
+                # Update progress indicator
                 self.update_progress_indicator()
                 
                 dialog.close()
@@ -195,6 +375,45 @@ class SevenStepWizard:
                 ui.button('确认跳过', on_click=on_skip).props('color=orange')
         
         dialog.open()
+    
+    def _apply_historical_data_to_session(self, step: int, hist_data: dict):
+        """Apply historical data to session for a specific step."""
+        try:
+            if step == 1 and 'optimal_speed' in hist_data:
+                speed = float(hist_data['optimal_speed'])
+                self.session.set_step1_result(speed, {'optimal_speed': speed, 'viscosity_at_optimal': 0})
+                self.session.set_step_quality(1, True)
+            elif step == 2 and 'balance_ratio' in hist_data:
+                ratio = float(hist_data['balance_ratio'])
+                self.session.set_step2_result(ratio, {1: 10.0, 2: 10.0, 3: 10.0, 4: 10.0})  # Mock weights
+                self.session.set_step_quality(2, ratio >= 0.95)
+            elif step == 3 and 'pressure_margin' in hist_data:
+                margin = float(hist_data['pressure_margin'])
+                self.session.set_step3_result(margin, margin < 10)
+                self.session.set_step_quality(3, margin >= 10)
+            elif step == 4:
+                low = float(hist_data.get('process_window_low', 0))
+                high = float(hist_data.get('process_window_high', 0))
+                window_width = high - low
+                self.session.set_step4_result({'min_pressure': low, 'max_pressure': high, 
+                                                'recommended': (low + high) / 2}, 
+                                               [])
+                self.session.set_step_quality(4, window_width >= 10)
+            elif step == 5 and 'gate_freeze_time' in hist_data:
+                freeze_time = float(hist_data['gate_freeze_time'])
+                self.session.set_step5_result(freeze_time, [])
+                self.session.set_step_quality(5, True)
+            elif step == 6 and 'cooling_time' in hist_data:
+                cooling_time = float(hist_data['cooling_time'])
+                self.session.set_step6_result(cooling_time, [])
+                self.session.set_step_quality(6, True)
+            elif step == 7 and 'clamping_force' in hist_data:
+                force = float(hist_data['clamping_force'])
+                self.session.set_step7_result(force, [])
+                self.session.set_step_quality(7, True)
+            print(f"[Historical Data] Applied to step {step}: {hist_data}")
+        except Exception as e:
+            print(f"[Historical Data] Error applying data: {e}")
     
     def show_completion_error_dialog(self, missing_steps: list):
         """Show error dialog when trying to complete without finishing all steps.
@@ -291,9 +510,16 @@ class SevenStepWizard:
             self.snapshot_inputs = self.create_machine_snapshot_ui()
             
             # Quick-fill buttons for testing reasonable / unreasonable data on the first page
+            def fill_step0_data(is_reasonable: bool):
+                """Fill step 0 data and set step 0 quality."""
+                self.fill_machine_snapshot(self.snapshot_inputs, is_reasonable)
+                # Only set step 0 quality when filling data from step 0 page
+                self.session.set_step_quality(0, is_reasonable)
+            
             with ui.row().classes('w-full gap-2'):
-                ui.button('填充合理数据', on_click=lambda: self.fill_machine_snapshot(self.snapshot_inputs, True)).props('flat')
-                ui.button('填充不合理数据', on_click=lambda: self.fill_machine_snapshot(self.snapshot_inputs, False)).props('flat color=negative')
+                ui.button('快速填充（合理）', on_click=lambda: fill_step0_data(True)).props('flat')
+                ui.button('快速填充（不合理）', on_click=lambda: fill_step0_data(False)).props('flat color=negative')
+                ui.button(f"🤖 实时AI点评（{self._get_ai_label()}）", on_click=lambda: self.trigger_realtime_ai(0)).props('flat color=primary')
 
             with ui.row().classes('w-full justify-end mt-4'):
                 ui.button("保存并开始试验", on_click=lambda: self.save_setup_info()).props('color=primary icon=play_arrow')
@@ -307,13 +533,18 @@ class SevenStepWizard:
             # otherwise default to reasonable
             if 0 not in self.session.step_data_quality:
                 self.session.set_step_quality(0, True)
+            # Refresh progress indicator so step 0 shows as completed
+            self.update_progress_indicator()
+            # Advance to step 1 and persist current step
+            self.session.current_step = 1
             ui.notify("✅ 基本信息已保存", type='positive')
-            self.stepper.next()
+            if self.stepper:
+                ui.timer(0.05, lambda: self.stepper.next(), once=True)
         except Exception as e:
             ui.notify(f"❌ 保存失败: {str(e)}", type='negative')
 
     def fill_machine_snapshot(self, inputs: Dict, is_reasonable: bool):
-        """Fill machine snapshot with simulated values and AI commentary."""
+        """Fill machine snapshot with simulated values and trigger AI commentary."""
         if is_reasonable:
             # 合理的项目信息
             inputs['model_no'].set_value("2026-PROJ-01")
@@ -356,33 +587,241 @@ class SevenStepWizard:
             inputs['vp_position'].set_value("25")
             inputs['cycle_time'].set_value("22.5")
             
-            inputs['ai_comment'].clear()
-            with inputs['ai_comment']:
-                glass_alert(
-                    "🤖 机台参数点评（合理）：\n"
-                    "✓ 料筒5段温度梯度合理（205→225°C），塑化均匀\n"
-                    "✓ 模具温度55°C，冷却效率与表面质量平衡\n"
-                    "✓ 周期稳定，保持在22.5s",
-                    "success"
-                )
+            # 显示数据已填充的通知
+            ui.notify("✅ 数据已填充完成，可点击实时AI点评", type='positive')
+            
+            # 先显示本地Mock（不触发实时AI）
+            mock_renderer = self._create_mock_renderer(is_reasonable)
+            self._set_pending_ai(0, inputs['ai_comment'], mock_renderer)
+            try:
+                inputs['ai_comment'].clear()
+                mock_renderer()
+            except Exception:
+                pass
         else:
-            # 不合理的参数 (省略部分以减小代码块)
+            # 不合理的参数
+            inputs['model_no'].set_value("TEST-ERR-01")
+            inputs['part_no'].set_value("ERR-999")
+            inputs['part_name'].set_value("Test Part with Errors")
+            inputs['supplier'].set_value("Unknown Supplier")
+            inputs['owner'].set_value("Test User")
+            inputs['theoretical_part_weight'].set_value("50.0")
+            inputs['actual_part_weight'].set_value("52.1")
+            
+            inputs['material_brand'].set_value("Unknown")
+            inputs['material_type'].set_value("Test Material")
+            inputs['material_number'].set_value("ERR000")
+            inputs['material_color'].set_value("Mixed")
+            inputs['material_density'].set_value("1.2")
+            inputs['drying_temp'].set_value("60")
+            inputs['drying_time'].set_value("2")
+
+            inputs['machine_number'].set_value("ERR-01")
+            inputs['machine_brand'].set_value("Unknown Brand")
+            inputs['machine_tonnage'].set_value("-100")
+            inputs['screw_diameter'].set_value("40")
+            inputs['intensification_ratio'].set_value("8.0")
+            inputs['mold_number'].set_value("ERR-MOLD")
+            inputs['cavity_count'].set_value("4")
+            inputs['runner_type'].set_value("Cold Runner")
+
+            # 不合理的机台参数
             inputs['barrel1'].set_value("260")
             inputs['mold_fixed'].set_value("30")
             inputs['mold_moving'].set_value("45")
             inputs['cycle_time'].set_value("35.0")
+            inputs['max_inj_pressure'].set_value("-50")
+            inputs['max_hold_pressure'].set_value("80")
+            inputs['vp_position'].set_value("15")
             
+            # 显示数据已填充的通知
+            ui.notify("✅ 不合理数据已填充完成，可点击实时AI点评", type='positive')
+            
+            # 先显示本地Mock（不触发实时AI）
+            mock_renderer = self._create_mock_renderer(is_reasonable)
+            self._set_pending_ai(0, inputs['ai_comment'], mock_renderer)
+            try:
+                inputs['ai_comment'].clear()
+                mock_renderer()
+            except Exception:
+                pass
+        
+        # Persist current inputs so realtime AI has full context
+        try:
+            self.session.machine_snapshot = self.capture_snapshot()
+        except Exception:
+            pass
+        # NOTE: Do NOT set step0 quality here - this function is called from multiple steps
+        # Step 0 quality should only be set when user explicitly fills data on step 0 page
+        # The caller (step 0's quick-fill button) should set the quality separately
+
+    def _set_pending_ai(self, step: int, container, mock_renderer: callable) -> None:
+        """Store AI rendering context for manual realtime trigger."""
+        self.pending_ai[int(step)] = {
+            "container": container,
+            "mock_renderer": mock_renderer,
+        }
+
+    def trigger_realtime_ai(self, step: int) -> None:
+        """Manually trigger realtime AI for a step after data is filled.
+        
+        NiceGUI requires UI operations to happen in the correct client context.
+        We use ui.timer with once=True to schedule the async work properly.
+        """
+        payload = self.pending_ai.get(int(step))
+        
+        # For step 0, auto-setup pending_ai if not set
+        if not payload and step == 0 and hasattr(self, 'snapshot_inputs'):
+            inputs = self.snapshot_inputs
+            if 'ai_comment' in inputs:
+                is_reasonable = self.session.step_data_quality.get(0, True)
+                mock_renderer = self._create_mock_renderer(is_reasonable)
+                self._set_pending_ai(0, inputs['ai_comment'], mock_renderer)
+                payload = self.pending_ai.get(0)
+        
+        if not payload:
+            ui.notify("请先填充或分析数据后再调用实时AI", type='warning')
+            return
+        
+        container = payload["container"]
+        
+        # Show loading indicator immediately (in current UI context)
+        container.clear()
+        with container:
+            with ui.row().classes("items-center gap-2"):
+                ui.spinner(size="lg")
+                ui.label("正在调用实时AI，请稍候...").classes("text-blue-600")
+        
+        # Use background_tasks.create for proper NiceGUI async handling
+        from nicegui import background_tasks
+        
+        async def do_ai_call():
+            import asyncio
+            
+            # Get API info
+            try:
+                from global_state import get_available_api_sync
+                current_api, api_key = get_available_api_sync()
+            except Exception:
+                current_api, api_key = None, None
+            
+            if not current_api or not api_key:
+                # Update UI - must use container context
+                container.clear()
+                with container:
+                    glass_alert("⚠️ 未配置 AI API Key，请前往设置页面配置。", "warning")
+                return
+            
+            step_idx = int(step)
+            
+            # Capture snapshot for step 0
+            if step_idx == 0:
+                try:
+                    if getattr(self, 'snapshot_inputs', None):
+                        self.session.machine_snapshot = self.capture_snapshot()
+                except Exception:
+                    pass
+            
+            # Define the blocking API call
+            def blocking_api_call():
+                try:
+                    if current_api == "openai":
+                        from openai_client import request_assessment
+                        return request_assessment(self.session, api_key=api_key, timeout=15, focus_step=step_idx)
+                    elif current_api == "gemini":
+                        from gemini_client import request_assessment
+                        return request_assessment(self.session, api_key=api_key, timeout=15, focus_step=step_idx)
+                    elif current_api == "deepseek":
+                        from openai_client import request_assessment
+                        return request_assessment(self.session, api_key=api_key, timeout=15, 
+                                                  api_url="https://api.deepseek.com", focus_step=step_idx)
+                except Exception as e:
+                    print(f"[AI] API call exception: {e}")
+                return None
+            
+            # Run blocking call in thread pool
+            assessment = await asyncio.get_event_loop().run_in_executor(None, blocking_api_call)
+            
+            # Update UI with result (we're back in the UI context now)
+            # Use 'with container:' to ensure we have a valid slot context for ALL UI operations
+            with container:
+                container.clear()
+                if assessment and isinstance(assessment, dict):
+                    try:
+                        self.session.set_ai_assessment(step_idx, assessment, provider=current_api)
+                    except Exception:
+                        pass
+                    
+                    text = self._format_assessment_text(assessment)
+                    glass_alert(f"🤖 实时AI点评（{current_api.upper()}）：\n" + text, "success")
+                    ui.notify(f"✅ AI点评成功", type="positive")
+                    print(f"[AI] Success for step {step_idx}")
+                else:
+                    glass_alert("⚠️ AI调用失败，请检查网络或API配置。", "warning")
+                    ui.notify("⚠️ AI调用失败", type="warning")
+                    print(f"[AI] Failed for step {step_idx}")
+        
+        background_tasks.create(do_ai_call())
+
+    def _get_ai_label(self) -> str:
+        try:
+            from global_state import get_available_api_sync
+            api_name, _ = get_available_api_sync()
+            return api_name.upper() if api_name else "AI"
+        except Exception:
+            return "AI"
+    
+    def _create_mock_renderer(self, is_reasonable: bool):
+        """Create a mock renderer function for AI comments."""
+        def mock_renderer():
+            inputs = self.snapshot_inputs
             inputs['ai_comment'].clear()
-            with inputs['ai_comment']:
-                glass_alert(
-                    "🤖 机台参数点评（不合理）：\n"
-                    "✗ 料筒温度倒梯度，易造成熔体不均\n"
-                    "✗ 模具温差过大（15°C），产品易翘曲变形\n"
-                    "✗ 周期35s过长，生产效率低下",
-                    "error"
-                )
-        # Record first-page data quality flag so navigation can react to it
-        self.session.set_step_quality(0, is_reasonable)
+            part_name = inputs['part_name'].value or "—"
+            model_no = inputs['model_no'].value or "—"
+            part_no = inputs['part_no'].value or "—"
+            supplier = inputs['supplier'].value or "—"
+            owner = inputs['owner'].value or "—"
+            material_brand = inputs['material_brand'].value or "—"
+            material_type = inputs['material_type'].value or "—"
+            material_color = inputs['material_color'].value or "—"
+            material_density = inputs['material_density'].value or "—"
+            machine_number = inputs['machine_number'].value or "—"
+            machine_brand = inputs['machine_brand'].value or "—"
+            machine_tonnage = inputs['machine_tonnage'].value or "—"
+            screw_diameter = inputs['screw_diameter'].value or "—"
+            mold_number = inputs['mold_number'].value or "—"
+            cavity_count = inputs['cavity_count'].value or "—"
+            runner_type = inputs['runner_type'].value or "—"
+            z1 = inputs['barrel1'].value or "—"
+            z5 = inputs['barrel5'].value or "—"
+            mold_fixed = inputs['mold_fixed'].value or "—"
+            mold_moving = inputs['mold_moving'].value or "—"
+            cycle_time = inputs['cycle_time'].value or "—"
+            
+            if is_reasonable:
+                with inputs['ai_comment']:
+                    glass_alert(
+                        "🤖 AI点评加载中...\n"
+                        f"【产品】{part_name} | Model {model_no} | Part {part_no} | 供应商 {supplier} | 负责人 {owner}\n"
+                        f"【材料】{material_brand} {material_type} | 颜色 {material_color} | 密度 {material_density} g/cm³\n"
+                        f"【机台&模具】{machine_number} {machine_brand} {machine_tonnage}T | 螺杆 {screw_diameter}mm | 模号 {mold_number} | 穴数 {cavity_count} | 流道 {runner_type}\n"
+                        f"【工艺】料筒温度梯度 {z1}→{z5}°C | 模温 {mold_fixed}/{mold_moving}°C | 周期 {cycle_time}s\n"
+                        "⏳ 已准备就绪，可点击实时AI点评",
+                        "info"
+                    )
+            else:
+                with inputs['ai_comment']:
+                    glass_alert(
+                        "🤖 AI点评加载中...\n"
+                        f"【产品】{part_name} 基础信息需复核\n"
+                        f"【材料】{material_brand} 建议确认干燥与密度参数\n"
+                        f"【机台&模具】机台 {machine_number} / 模号 {mold_number} 建议核对规格\n"
+                        f"【工艺】模温 {mold_fixed}/{mold_moving}°C 温差偏大；周期 {cycle_time}s 过长\n"
+                        "⏳ 已准备就绪，可点击实时AI点评",
+                        "info"
+                    )
+        
+        return mock_renderer
     
     def capture_snapshot(self) -> MachineSnapshot:
         """Capture current snapshot from UI inputs."""
@@ -434,6 +873,615 @@ class SevenStepWizard:
             self.session.machine_snapshot = self.capture_snapshot()
         except Exception:
             pass
+
+    def _format_assessment_text(self, assessment: Dict[str, Any]) -> str:
+        """Format provider assessment dict into Chinese display text."""
+        if not isinstance(assessment, dict):
+            return str(assessment)
+
+        parts: List[str] = []
+        overall = assessment.get('overall') or assessment.get('conclusions') or assessment.get('conclusion')
+        if overall:
+            if isinstance(overall, (list, tuple)):
+                parts.append("总体评价：\n" + "\n".join([str(x) for x in overall]))
+            else:
+                parts.append("总体评价：\n" + str(overall))
+
+        conclusions = assessment.get('conclusions') or assessment.get('conclusion')
+        if conclusions and conclusions != overall:
+            if isinstance(conclusions, (list, tuple)):
+                parts.append("结论：\n" + "\n".join([f"• {c}" for c in conclusions]))
+            else:
+                parts.append("结论：\n" + str(conclusions))
+
+        actions = assessment.get('actions')
+        if actions:
+            if isinstance(actions, (list, tuple)):
+                parts.append("建议动作：\n" + "\n".join([f"• {a}" for a in actions]))
+            else:
+                parts.append("建议动作：\n" + str(actions))
+
+        risks = assessment.get('risks')
+        if risks:
+            if isinstance(risks, (list, tuple)):
+                parts.append("风险提示：\n" + "\n".join([f"• {r}" for r in risks]))
+            else:
+                parts.append("风险提示：\n" + str(risks))
+
+        missing = assessment.get('missing_key_data')
+        if missing and isinstance(missing, list):
+            lines: List[str] = []
+            for it in missing:
+                if isinstance(it, dict):
+                    step = it.get('step')
+                    label = it.get('label') or it.get('field') or it.get('name')
+                    why = it.get('why')
+                    how = it.get('how_to_get')
+                    line = f"• Step{step} {label}" if step is not None else f"• {label}"
+                    if why:
+                        line += f"（用途：{why}）"
+                    if how:
+                        line += f"；补齐建议：{how}"
+                    lines.append(line)
+                else:
+                    lines.append(f"• {it}")
+            if lines:
+                parts.append("缺失关键数据（请补齐）：\n" + "\n".join(lines))
+
+        bad_points = assessment.get('unreasonable_data_points')
+        if bad_points and isinstance(bad_points, list):
+            lines = []
+            for it in bad_points:
+                if not isinstance(it, dict):
+                    lines.append(f"• {it}")
+                    continue
+                step = it.get('step')
+                field = it.get('field')
+                value = it.get('value')
+                why = it.get('why')
+                suggestion = it.get('suggestion')
+                line = f"• Step{step} {field}={value}"
+                if why:
+                    line += f"，原因：{why}"
+                if suggestion:
+                    line += f"，建议：{suggestion}"
+                lines.append(line)
+            if lines:
+                parts.append("不合理数据点（逐条）：\n" + "\n".join(lines))
+
+        return "\n\n".join(parts) if parts else str(assessment)
+
+    def _compute_missing_key_data(self, focus_step: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Compute which key numeric fields are missing (None/empty/zero) for the current session.
+
+        This is deterministic and prevents the AI from being vague about "missing key data".
+        """
+
+        def _is_missing(value: Any) -> bool:
+            if value is None:
+                return True
+            if isinstance(value, str):
+                v = value.strip().lower()
+                return v in ("", "n/a", "na", "none", "null")
+            if isinstance(value, (list, tuple, dict, set)):
+                return len(value) == 0
+            if isinstance(value, (int, float)):
+                return float(value) == 0.0
+            return False
+
+        # Required fields by step
+        requirements: List[Dict[str, Any]] = [
+            # Step 0 (snapshot / setup)
+            {
+                'step': 0,
+                'field': 'machine_snapshot.machine_tonnage',
+                'label': '机台吨位 (machine_tonnage)',
+                'why': '用于校核锁模力与成型安全裕度',
+                'how_to_get': '从机台铭牌/参数页面录入',
+                'get': lambda: getattr(getattr(self.session, 'machine_snapshot', None), 'machine_tonnage', None),
+            },
+            {
+                'step': 0,
+                'field': 'machine_snapshot.screw_diameter',
+                'label': '螺杆直径 (screw_diameter)',
+                'why': '影响剪切速率/粘度曲线与充填能力评估',
+                'how_to_get': '从机台配置或螺杆规格获取',
+                'get': lambda: getattr(getattr(self.session, 'machine_snapshot', None), 'screw_diameter', None),
+            },
+            {
+                'step': 0,
+                'field': 'machine_snapshot.max_injection_pressure',
+                'label': '最大注射压力 (max_injection_pressure)',
+                'why': '用于步骤3压力裕度与是否压力受限判断',
+                'how_to_get': '从机台参数/报警设定读取并录入',
+                'get': lambda: getattr(getattr(self.session, 'machine_snapshot', None), 'max_injection_pressure', None),
+            },
+            {
+                'step': 0,
+                'field': 'machine_snapshot.max_holding_pressure',
+                'label': '最大保压压力 (max_holding_pressure)',
+                'why': '用于保压能力/浇口冻结窗口判断',
+                'how_to_get': '从机台保压上限设定读取并录入',
+                'get': lambda: getattr(getattr(self.session, 'machine_snapshot', None), 'max_holding_pressure', None),
+            },
+            {
+                'step': 0,
+                'field': 'machine_snapshot.vp_transfer_position',
+                'label': 'V/P切换位置 (vp_transfer_position)',
+                'why': '用于一致性控制与工艺窗口复现实验',
+                'how_to_get': '从当前生产配方/机台曲线读取',
+                'get': lambda: getattr(getattr(self.session, 'machine_snapshot', None), 'vp_transfer_position', None),
+            },
+            {
+                'step': 0,
+                'field': 'machine_snapshot.cycle_time',
+                'label': '成型周期 (cycle_time)',
+                'why': '影响冷却/产能与温度平衡评估',
+                'how_to_get': '从机台实际循环监控读取',
+                'get': lambda: getattr(getattr(self.session, 'machine_snapshot', None), 'cycle_time', None),
+            },
+            # Step 1
+            {
+                'step': 1,
+                'field': 'viscosity_data_points',
+                'label': '粘度曲线数据点 (speed/viscosity)',
+                'why': '用于找到拐点与最佳充填速度',
+                'how_to_get': '录入或Excel导入：至少3个速度-粘度点',
+                'get': lambda: getattr(self.session, 'viscosity_data_points', None),
+            },
+            {
+                'step': 1,
+                'field': 'viscosity_inflection_point',
+                'label': '粘度拐点结果 (inflection point)',
+                'why': '用于确定推荐注射速度与工艺基准',
+                'how_to_get': '完成步骤1计算后自动生成；若为空请重新计算/检查输入',
+                'get': lambda: getattr(self.session, 'viscosity_inflection_point', None),
+            },
+            # Step 2
+            {
+                'step': 2,
+                'field': 'cavity_weights',
+                'label': '短射型腔重量 (cavity_weights)',
+                'why': '用于型腔平衡判定与流道调整方向',
+                'how_to_get': '每穴称重并录入/Excel导入',
+                'get': lambda: getattr(self.session, 'cavity_weights', None),
+            },
+            {
+                'step': 2,
+                'field': 'cavity_weights_full',
+                'label': '满射型腔重量 (cavity_weights_full)',
+                'why': '用于确认平衡在充满状态下是否仍成立',
+                'how_to_get': '每穴满射称重并录入/Excel导入',
+                'get': lambda: getattr(self.session, 'cavity_weights_full', None),
+            },
+            # Step 3
+            {
+                'step': 3,
+                'field': 'pressure_drop_data',
+                'label': '压力降/压力分布数据 (pressure_drop_data)',
+                'why': '用于计算压力裕度与识别压力受限',
+                'how_to_get': '录入各段压力/曲线采样点（喷嘴/前段/末端等）',
+                'get': lambda: getattr(self.session, 'pressure_drop_data', None),
+            },
+            {
+                'step': 3,
+                'field': 'pressure_margin',
+                'label': '压力裕度结果 (pressure_margin)',
+                'why': '用于判断是否有足够工艺窗口与稳定性',
+                'how_to_get': '完成步骤3计算后自动生成；若为空请补录压力数据后重算',
+                'get': lambda: getattr(self.session, 'pressure_margin', None),
+            },
+            # Step 4
+            {
+                'step': 4,
+                'field': 'process_window_data',
+                'label': '工艺窗口试验点数据 (process_window_data)',
+                'why': '用于建立O-Window并确定中心点',
+                'how_to_get': '按矩阵试验记录16点（或系统要求点数）并录入/导入',
+                'get': lambda: getattr(self.session, 'process_window_data', None),
+            },
+            {
+                'step': 4,
+                'field': 'process_window_bounds',
+                'label': '工艺窗口边界结果 (process_window_bounds)',
+                'why': '用于定义可控范围与验收标准',
+                'how_to_get': '完成步骤4计算后自动生成；若为空请补齐试验点数据',
+                'get': lambda: getattr(self.session, 'process_window_bounds', None),
+            },
+            # Step 5
+            {
+                'step': 5,
+                'field': 'gate_seal_curve',
+                'label': '浇口冻结曲线数据 (gate_seal_curve)',
+                'why': '用于确定最小保压时间，避免过保压/欠保压',
+                'how_to_get': '记录不同保压时间下重量变化并录入/Excel导入',
+                'get': lambda: getattr(self.session, 'gate_seal_curve', None),
+            },
+            {
+                'step': 5,
+                'field': 'gate_freeze_time',
+                'label': '浇口冻结时间结果 (gate_freeze_time)',
+                'why': '用于设定保压时间与稳定窗口',
+                'how_to_get': '完成步骤5分析后自动生成；若为空请补录曲线数据后重算',
+                'get': lambda: getattr(self.session, 'gate_freeze_time', None),
+            },
+            # Step 6
+            {
+                'step': 6,
+                'field': 'cooling_curve',
+                'label': '冷却曲线数据 (cooling_curve)',
+                'why': '用于确定可靠冷却时间并控制翘曲/收缩',
+                'how_to_get': '记录不同冷却时间的温度/变形/外观并录入/Excel导入',
+                'get': lambda: getattr(self.session, 'cooling_curve', None),
+            },
+            {
+                'step': 6,
+                'field': 'recommended_cooling_time',
+                'label': '推荐冷却时间结果 (recommended_cooling_time)',
+                'why': '用于量产周期与质量稳定性设定',
+                'how_to_get': '完成步骤6分析后自动生成；若为空请补录冷却曲线数据',
+                'get': lambda: getattr(self.session, 'recommended_cooling_time', None),
+            },
+            # Step 7
+            {
+                'step': 7,
+                'field': 'clamping_force_curve',
+                'label': '锁模力试验曲线 (clamping_force_curve)',
+                'why': '用于确定最小锁模力与防飞边窗口',
+                'how_to_get': '记录不同锁模力下飞边/重量变化并录入',
+                'get': lambda: getattr(self.session, 'clamping_force_curve', None),
+            },
+            {
+                'step': 7,
+                'field': 'recommended_clamping_force',
+                'label': '推荐锁模力结果 (recommended_clamping_force)',
+                'why': '用于锁模设定与设备能力校核',
+                'how_to_get': '完成步骤7分析后自动生成；若为空请补录锁模力曲线数据',
+                'get': lambda: getattr(self.session, 'recommended_clamping_force', None),
+            },
+        ]
+
+        try:
+            focus = int(focus_step) if focus_step is not None else None
+        except Exception:
+            focus = None
+
+        missing_items: List[Dict[str, Any]] = []
+        for req in requirements:
+            step = req.get('step')
+            if focus is not None and step not in (0, focus):
+                # When focusing a step, still keep step0 snapshot requirements
+                continue
+            getter = req.get('get')
+            try:
+                value = getter() if callable(getter) else None
+            except Exception:
+                value = None
+
+            # Special handling for viscosity points: require at least 3 points
+            if req.get('field') == 'viscosity_data_points':
+                if not isinstance(value, list) or len(value) < 3:
+                    missing_items.append({k: req[k] for k in ('step', 'field', 'label', 'why', 'how_to_get')})
+                continue
+
+            if _is_missing(value):
+                missing_items.append({k: req[k] for k in ('step', 'field', 'label', 'why', 'how_to_get')})
+
+        return missing_items
+
+    async def _render_ai_comment_async(self, container, mock_renderer: callable, step: Optional[int] = None):
+        """Async version: Render AI comment without blocking UI."""
+        import asyncio
+        
+        # Import app_state and helper function
+        try:
+            from global_state import app_state, get_available_api_sync
+        except Exception:
+            app_state = {}
+            get_available_api_sync = lambda: (None, None)
+        
+        # Determine step
+        try:
+            step_idx = int(step) if step is not None else int(getattr(self.session, 'current_step', 0) or 0)
+        except Exception:
+            step_idx = 0
+
+        # For step 0, capture snapshot
+        if step_idx == 0:
+            try:
+                if getattr(self, 'snapshot_inputs', None):
+                    self.session.machine_snapshot = self.capture_snapshot()
+            except Exception:
+                pass
+
+        # Get API
+        current_api, api_key = get_available_api_sync()
+        
+        if not current_api or not api_key:
+            container.clear()
+            with container:
+                glass_alert("⚠️ 未配置 AI API Key，请前往设置页面配置。", "warning")
+            container.update()
+            return
+
+        # Show loading
+        ui.notify(f"⏳ 正在调用 {current_api.upper()}...", type="info")
+
+        # Run API call in background thread
+        def call_api():
+            if current_api == "openai":
+                from openai_client import request_assessment
+                return request_assessment(self.session, api_key=api_key, timeout=20, focus_step=step_idx)
+            elif current_api == "gemini":
+                from gemini_client import request_assessment
+                return request_assessment(self.session, api_key=api_key, timeout=20, focus_step=step_idx)
+            elif current_api == "deepseek":
+                from openai_client import request_assessment
+                return request_assessment(self.session, api_key=api_key, timeout=20, api_url="https://api.deepseek.com", focus_step=step_idx)
+            return None
+
+        try:
+            assessment = await asyncio.to_thread(call_api)
+        except Exception as e:
+            print(f"[AI Comment] API call failed: {e}")
+            assessment = None
+
+        # Update UI with result
+        if assessment and isinstance(assessment, dict):
+            try:
+                self.session.set_ai_assessment(step_idx, assessment, provider=current_api)
+            except Exception:
+                pass
+            
+            text = self._format_assessment_text(assessment)
+            container.clear()
+            with container:
+                glass_alert(f"🤖 实时AI点评（{current_api.upper()}）：\n" + text, "success")
+            container.update()
+            ui.notify(f"✅ 实时AI点评成功（{current_api.upper()}）", type="positive")
+            print(f"[AI Comment] Realtime AI succeeded for step {step_idx}")
+        else:
+            container.clear()
+            with container:
+                glass_alert("⚠️ 实时AI调用失败，请检查网络或API配置。", "warning")
+            container.update()
+            ui.notify("⚠️ 实时AI调用失败", type="warning")
+            print(f"[AI Comment] All API attempts failed for step {step_idx}")
+
+    def _render_ai_comment(self, container, mock_renderer: callable, step: Optional[int] = None):
+        """Render AI comment: first show mock immediately, then attempt realtime AI in background.
+        
+        Flow:
+        1. Immediately render mock data so user sees results fast
+        2. Show a notification that realtime AI is being requested
+        3. If realtime AI succeeds, replace mock with realtime result
+        4. If realtime AI fails, show notification and keep mock
+        """
+        # Import app_state and helper function from main to access global API keys
+        try:
+            from global_state import app_state, get_available_api_sync
+        except Exception:
+            app_state = {}
+            get_available_api_sync = lambda: (None, None)
+        
+        # Determine which step to attribute this comment to
+        try:
+            step_idx = int(step) if step is not None else int(getattr(self.session, 'current_step', 0) or 0)
+        except Exception:
+            step_idx = 0
+
+        # For step 0, ensure latest inputs are captured before requesting AI
+        if step_idx == 0:
+            try:
+                if getattr(self, 'snapshot_inputs', None):
+                    self.session.machine_snapshot = self.capture_snapshot()
+            except Exception:
+                pass
+
+        # Step 1: Immediately render mock data
+        try:
+            container.clear()
+            mock_renderer()
+        except Exception as e:
+            print(f"[AI Comment] Mock renderer failed: {e}")
+
+        # Get the current available API
+        current_api, api_key = get_available_api_sync()
+        
+        # If no API key available, show configuration prompt
+        if not current_api or not api_key:
+            print(f"[AI Comment] No API key available, showing config prompt for step {step_idx}")
+            try:
+                container.clear()
+                with container:
+                    glass_alert(
+                        "⚠️ 未配置 AI API Key\n\n"
+                        "请前往首页设置页面配置有效的 API Key，然后重新测试此步骤。\n"
+                        "目前显示的是本地 Mock AI 演示结果。",
+                        "warning"
+                    )
+                ui.notification(
+                    "⚠️ 未配置 AI API Key，已显示本地Mock",
+                    type="warning",
+                    position="top",
+                    timeout=6000,
+                )
+            except Exception as e:
+                print(f"[AI Comment] Failed to show config prompt: {e}")
+            return
+
+        provider_label = current_api.upper() if current_api else "AI"
+
+        # Step 2: Show notification that realtime AI is being requested
+        loading_notification = None
+        try:
+            loading_notification = ui.notification(
+                f"⏳ 正在调用 {provider_label} ...",
+                type="info",
+                position="top",
+                timeout=None,  # Don't auto-dismiss
+                close_button=True,
+            )
+        except Exception as e:
+            print(f"[AI Comment] Failed to show loading notification: {e}")
+
+        request_id = f"{step_idx}-{time.time()}"
+        try:
+            if step_idx in self.pending_ai:
+                self.pending_ai[step_idx]["request_id"] = request_id
+                self.pending_ai[step_idx]["ai_done"] = False
+        except Exception:
+            pass
+
+        # Request AI synchronously to avoid background slot errors
+        try:
+            assessment = None
+            used_api = current_api
+
+            print(f"[AI Comment] Using {current_api.upper()} API...")
+
+            if current_api == "openai":
+                from openai_client import request_assessment as request_openai_assessment
+                print(f"[AI Comment] Calling OpenAI with 30s timeout...")
+                assessment = request_openai_assessment(
+                    self.session,
+                    api_key=api_key,
+                    timeout=30,
+                    focus_step=step_idx,
+                )
+            elif current_api == "gemini":
+                from gemini_client import request_assessment as request_gemini_assessment
+                print(f"[AI Comment] Calling Gemini with 30s timeout...")
+                assessment = request_gemini_assessment(
+                    self.session,
+                    api_key=api_key,
+                    timeout=30,
+                    focus_step=step_idx,
+                )
+            elif current_api == "deepseek":
+                from openai_client import request_assessment as request_openai_assessment
+                assessment = request_openai_assessment(
+                    self.session,
+                    api_key=api_key,
+                    timeout=30,
+                    api_url="https://api.deepseek.com",
+                    focus_step=step_idx,
+                )
+
+            # Fallback: Try other available APIs (including when DeepSeek fails)
+            if assessment is None and app_state:
+                for api_name in app_state.get("api_priority_order", []):
+                    if api_name == current_api:
+                        continue
+                    fallback_key = app_state.get("api_keys", {}).get(api_name)
+                    if fallback_key:
+                        print(f"[AI Comment] Fallback to {api_name.upper()}...")
+                        if api_name == "openai":
+                            from openai_client import request_assessment as request_openai_assessment
+                            assessment = request_openai_assessment(
+                                self.session,
+                                api_key=fallback_key,
+                                timeout=30,
+                                focus_step=step_idx,
+                            )
+                        elif api_name == "gemini":
+                            from gemini_client import request_assessment as request_gemini_assessment
+                            assessment = request_gemini_assessment(
+                                self.session,
+                                api_key=fallback_key,
+                                timeout=30,
+                                focus_step=step_idx,
+                            )
+                        elif api_name == "deepseek":
+                            from openai_client import request_assessment as request_openai_assessment
+                            assessment = request_openai_assessment(
+                                self.session,
+                                api_key=fallback_key,
+                                timeout=30,
+                                api_url="https://api.deepseek.com",
+                                focus_step=step_idx,
+                            )
+
+                        if assessment:
+                            app_state["current_api"] = api_name
+                            used_api = api_name
+                            print(f"[AI Comment] {api_name.upper()} fallback succeeded!")
+                            break
+
+            # Dismiss loading notification
+            try:
+                if loading_notification:
+                    loading_notification.dismiss()
+            except Exception:
+                pass
+
+            if assessment and isinstance(assessment, dict):
+                try:
+                    computed_missing = self._compute_missing_key_data(focus_step=step_idx)
+                    existing_missing = assessment.get('missing_key_data')
+                    if computed_missing and (not isinstance(existing_missing, list) or len(existing_missing) == 0):
+                        assessment['missing_key_data'] = computed_missing
+                except Exception:
+                    pass
+
+                try:
+                    self.session.set_ai_assessment(step_idx, assessment, provider=used_api)
+                except Exception:
+                    pass
+
+                text = self._format_assessment_text(assessment)
+                provider_label = f"（{used_api.upper()}）" if used_api else ""
+
+                try:
+                    if step_idx in self.pending_ai and self.pending_ai[step_idx].get("request_id") == request_id:
+                        self.pending_ai[step_idx]["ai_done"] = True
+                except Exception:
+                    pass
+
+                container.clear()
+                with container:
+                    glass_alert(f"🤖 实时AI点评{provider_label}：\n" + text, "success")
+                container.update()
+                ui.notify(f"✅ 实时AI点评成功（{used_api.upper()}）", type="positive")
+
+                print(f"[AI Comment] Realtime AI succeeded for step {step_idx}")
+            else:
+                print(f"[AI Comment] All API attempts failed, keeping mock for step {step_idx}")
+                try:
+                    if step_idx in self.pending_ai and self.pending_ai[step_idx].get("request_id") == request_id:
+                        self.pending_ai[step_idx]["ai_done"] = True
+                except Exception:
+                    pass
+
+                container.clear()
+                with container:
+                    glass_alert(
+                        "⚠️ 实时AI调用失败，已启用本地Mock AI\n\n"
+                        "请检查API配置或网络连接。",
+                        "warning"
+                    )
+                container.update()
+                ui.notify("⚠️ 实时AI调用失败", type="warning")
+
+        except Exception as e:
+            print(f"[AI Comment] Realtime AI request failed: {e}")
+            try:
+                if loading_notification:
+                    loading_notification.dismiss()
+            except Exception:
+                pass
+            try:
+                container.clear()
+                with container:
+                    glass_alert(
+                        "⚠️ 实时AI调用异常\n\n"
+                        "请检查API配置或网络连接。",
+                        "warning"
+                    )
+                container.update()
+                ui.notify("⚠️ 实时AI调用异常", type="warning")
+            except Exception:
+                pass
 
     async def handle_excel_upload(self, e: UploadEventArguments, speeds_input, viscosities_input, 
                                    screw_dia, machine_inputs, upload_status):
@@ -653,60 +1701,73 @@ class SevenStepWizard:
                     speed_range = max(speeds) - min(speeds)
                     is_reasonable = len(speeds) >= 5 and speed_range >= 30
                     
-                    with ai_comment:
-                        if is_reasonable:
-                            glass_alert(
-                                f"🤖 AI点评（您的真实数据）：\n\n"
-                                f"✓ 共{len(speeds)}个测试点，数据充足\n"
-                                f"✓ 射速范围: {min(speeds):.1f} - {max(speeds):.1f} mm/s (跨度{speed_range:.1f}mm/s)\n"
-                                f"✓ 粘度范围: {min(viscosities):.1f} - {max(viscosities):.1f} MPa·s\n"
-                                f"📊 正在分析粘度曲线拐点...",
-                                "success"
-                            )
-                        else:
-                            issues = []
-                            if len(speeds) < 5:
-                                issues.append(f"测试点较少({len(speeds)}个)，建议至少5个点")
-                            if speed_range < 30:
-                                issues.append(f"射速范围较窄({speed_range:.1f}mm/s)，建议扩大")
-                            glass_alert(
-                                f"🤖 AI点评（您的真实数据）：\n\n"
-                                f"⚠ 数据质量提醒:\n" + "\n".join([f"  • {i}" for i in issues]),
-                                "warning"
-                            )
+                    def _mock_local_user():
+                        ai_comment.clear()
+                        with ai_comment:
+                            if is_reasonable:
+                                glass_alert(
+                                    f"🤖 Mock AI点评（您的真实数据）：\n\n"
+                                    f"✓ 共{len(speeds)}个测试点，数据充足\n"
+                                    f"✓ 射速范围: {min(speeds):.1f} - {max(speeds):.1f} mm/s (跨度{speed_range:.1f}mm/s)\n"
+                                    f"✓ 粘度范围: {min(viscosities):.1f} - {max(viscosities):.1f} MPa·s\n"
+                                    f"📊 正在分析粘度曲线拐点...",
+                                    "success"
+                                )
+                            else:
+                                issues = []
+                                if len(speeds) < 5:
+                                    issues.append(f"测试点较少({len(speeds)}个)，建议至少5个点")
+                                if speed_range < 30:
+                                    issues.append(f"射速范围较窄({speed_range:.1f}mm/s)，建议扩大")
+                                glass_alert(
+                                    f"🤖 Mock AI点评（您的真实数据）：\n\n"
+                                    f"⚠ 数据质量提醒:\n" + "\n".join([f"  • {i}" for i in issues]),
+                                    "warning"
+                                )
+
+                    # Ensure raw viscosity points are present for AI pinpointing
+                    try:
+                        self.session.viscosity_data_points = [
+                            {'index': idx + 1, 'speed_mm_s': float(s), 'viscosity': float(v)}
+                            for idx, (s, v) in enumerate(zip(speeds, viscosities))
+                        ]
+                    except Exception:
+                        pass
+                    self._set_pending_ai(1, ai_comment, _mock_local_user)
+                    _mock_local_user()
                     
                     # 运行分析算法
                     inflection = find_viscosity_inflection_point(speeds, viscosities)
                     optimal_speed = inflection['optimal_speed']
-                    self.session.set_step1_result(optimal_speed, inflection)
-                    self.session.set_step_quality(1, is_reasonable)
-                    
-                    result_label.set_text(f"✓ 分析完成\n识别的最佳射速: {optimal_speed:.1f} mm/s\n该速度将自动应用于步骤2和步骤3")
-                    result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
-                    result_label.classes(add="text-emerald-600")
-                    
-                    # 绘制图表
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=speeds, y=viscosities, mode='lines+markers', name='粘度曲线',
-                        line=dict(color='#3b82f6', width=2)))
-                    fig.add_trace(go.Scatter(x=[optimal_speed], y=[inflection['viscosity_at_optimal']],
-                        mode='markers', name='拐点', marker=dict(color='red', size=15, symbol='star')))
-                    fig.update_layout(title="粘度曲线分析 (您的真实数据)", xaxis_title="射速 (mm/s)", yaxis_title="有效粘度 (MPa·s)", template="plotly_white", height=400)
-                    
-                    chart_container.clear()
-                    with chart_container:
-                        ui.plotly(fig).classes('w-full')
-                    
-                    self.update_progress_indicator()
-                    
-                    if not is_reasonable:
-                        await self.show_unreasonable_data_dialog(
-                            step=1,
-                            data_issue=f"测试点{len(speeds)}个，射速范围{speed_range:.1f}mm/s",
-                            on_continue=lambda: ui.notify("✓ 步骤1完成（已记录备注）", type='warning')
-                        )
-                    else:
-                        ui.notify("✓ 步骤1完成 - 使用您的真实数据", type='positive')
+
+                    def _finalize_step1(assessment=None):
+                        self.session.set_step1_result(optimal_speed, inflection)
+                        self.session.set_step_quality(1, is_reasonable)
+
+                        result_label.set_text(f"✓ 分析完成\n识别的最佳射速: {optimal_speed:.1f} mm/s\n该速度将自动应用于步骤2和步骤3")
+                        result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
+                        result_label.classes(add="text-emerald-600")
+
+                        # 绘制图表
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=speeds, y=viscosities, mode='lines+markers', name='粘度曲线',
+                            line=dict(color='#3b82f6', width=2)))
+                        fig.add_trace(go.Scatter(x=[optimal_speed], y=[inflection['viscosity_at_optimal']],
+                            mode='markers', name='拐点', marker=dict(color='red', size=15, symbol='star')))
+                        fig.update_layout(title="粘度曲线分析 (您的真实数据)", xaxis_title="射速 (mm/s)", yaxis_title="有效粘度 (MPa·s)", template="plotly_white", height=400)
+
+                        chart_container.clear()
+                        with chart_container:
+                            ui.plotly(fig).classes('w-full')
+
+                        # Note: progress indicator will be updated when clicking 'Next' and confirming
+
+                        if not is_reasonable:
+                            ui.notify("✓ 步骤1数据已填充（数据偏离，点击'下一步'时确认）", type='warning')
+                        else:
+                            ui.notify("✓ 步骤1数据已填充 - 使用您的真实数据", type='positive')
+
+                    _finalize_step1()
                 
                 except ValueError as e:
                     ui.notify(f"数据格式错误: 请输入数字，用逗号分隔", type='error')
@@ -729,15 +1790,26 @@ class SevenStepWizard:
                         viscosities_input.set_value("1844,517,350,305,275,253,230")
                         screw_dia.set_value("53")
                         
-                        with ai_comment:
-                            glass_alert(
-                                "🤖 AI点评（PA6 260G6模拟案例）：\n\n"
-                                "✓ 射速6.8-68.8mm/s，覆盖完整剪切区\n"
-                                "✓ 螺杆直径53mm，YIZUMI 260T油压机\n"
-                                "✓ 粘度曲线在37-53mm/s区间有明显拐点\n"
-                                "✓ 最佳射速推荐：45-53mm/s",
-                                "success"
-                            )
+                        def _mock_sim_ok():
+                            ai_comment.clear()
+                            with ai_comment:
+                                glass_alert(
+                                    "🤖 Mock AI点评（PA6 260G6模拟案例）：\n\n"
+                                    "✓ 射速6.8-68.8mm/s，覆盖完整剪切区\n"
+                                    "✓ 螺杆直径53mm，YIZUMI 260T油压机\n"
+                                    "✓ 粘度曲线在37-53mm/s区间有明显拐点\n"
+                                    "✓ 最佳射速推荐：45-53mm/s",
+                                    "success"
+                                )
+                        try:
+                            self.session.viscosity_data_points = [
+                                {'index': idx + 1, 'speed_mm_s': float(s), 'viscosity': float(v)}
+                                for idx, (s, v) in enumerate(zip(speeds, viscosities))
+                            ]
+                        except Exception:
+                            pass
+                        self._set_pending_ai(1, ai_comment, _mock_sim_ok)
+                        _mock_sim_ok()
                     else:
                         speeds = [50, 55, 60]
                         viscosities = [75, 74, 73]
@@ -745,46 +1817,57 @@ class SevenStepWizard:
                         viscosities_input.set_value("75,74,73")
                         screw_dia.set_value("80")
                         
-                        with ai_comment:
-                            glass_alert(
-                                "🤖 AI点评（不合理模拟数据）：\n\n"
-                                "✗ 射速范围太窄（仅50-60mm/s）\n"
-                                "✗ 仅3个测试点不足以精确定位拐点\n"
-                                "⚠ 建议：扩大射速范围",
-                                "error"
-                            )
+                        def _mock_sim_bad():
+                            ai_comment.clear()
+                            with ai_comment:
+                                glass_alert(
+                                    "🤖 Mock AI点评（不合理模拟数据）：\n\n"
+                                    "✗ 射速范围太窄（仅50-60mm/s）\n"
+                                    "✗ 仅3个测试点不足以精确定位拐点\n"
+                                    "⚠ 建议：扩大射速范围",
+                                    "error"
+                                )
+                        try:
+                            self.session.viscosity_data_points = [
+                                {'index': idx + 1, 'speed_mm_s': float(s), 'viscosity': float(v)}
+                                for idx, (s, v) in enumerate(zip(speeds, viscosities))
+                            ]
+                        except Exception:
+                            pass
+                        self._set_pending_ai(1, ai_comment, _mock_sim_bad)
+                        _mock_sim_bad()
                     
                     inflection = find_viscosity_inflection_point(speeds, viscosities)
                     optimal_speed = inflection['optimal_speed']
-                    self.session.set_step1_result(optimal_speed, inflection)
-                    self.session.set_step_quality(1, is_reasonable)
-                    
-                    status = "✓ 合理" if is_reasonable else "⚠ 需改进"
-                    result_label.set_text(f"{status}\n识别的最佳射速: {optimal_speed:.1f} mm/s")
-                    result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
-                    result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
-                    
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=speeds, y=viscosities, mode='lines+markers', name='粘度曲线',
-                        line=dict(color='#3b82f6' if is_reasonable else '#ef4444', width=2)))
-                    fig.add_trace(go.Scatter(x=[optimal_speed], y=[inflection['viscosity_at_optimal']],
-                        mode='markers', name='拐点', marker=dict(color='red', size=15, symbol='star')))
-                    fig.update_layout(title="粘度曲线分析", xaxis_title="射速 (mm/s)", yaxis_title="相对粘度", template="plotly_white", height=400)
-                    
-                    chart_container.clear()
-                    with chart_container:
-                        ui.plotly(fig).classes('w-full')
-                    
-                    self.update_progress_indicator()
-                    
-                    if not is_reasonable:
-                        await self.show_unreasonable_data_dialog(
-                            step=1,
-                            data_issue="射速范围太窄，仅3个测试点",
-                            on_continue=lambda: ui.notify("✓ 步骤1完成（已记录备注）", type='warning')
-                        )
-                    else:
-                        ui.notify(f"✓ 步骤1完成", type='positive')
+
+                    def _finalize_step1(assessment=None):
+                        self.session.set_step1_result(optimal_speed, inflection)
+                        self.session.set_step_quality(1, is_reasonable)
+
+                        status = "✓ 合理" if is_reasonable else "⚠ 需改进"
+                        result_label.set_text(f"{status}\n识别的最佳射速: {optimal_speed:.1f} mm/s")
+                        result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
+                        result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
+
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=speeds, y=viscosities, mode='lines+markers', name='粘度曲线',
+                            line=dict(color='#3b82f6' if is_reasonable else '#ef4444', width=2)))
+                        fig.add_trace(go.Scatter(x=[optimal_speed], y=[inflection['viscosity_at_optimal']],
+                            mode='markers', name='拐点', marker=dict(color='red', size=15, symbol='star')))
+                        fig.update_layout(title="粘度曲线分析", xaxis_title="射速 (mm/s)", yaxis_title="相对粘度", template="plotly_white", height=400)
+
+                        chart_container.clear()
+                        with chart_container:
+                            ui.plotly(fig).classes('w-full')
+
+                        # Note: progress indicator will be updated when clicking 'Next' and confirming
+
+                        if not is_reasonable:
+                            ui.notify("✓ 步骤1数据已填充（数据偏离，点击'下一步'时确认）", type='warning')
+                        else:
+                            ui.notify(f"✓ 步骤1数据已填充", type='positive')
+
+                    _finalize_step1()
                 
                 except Exception as e:
                     result_label.set_text(f"✗ 错误: {str(e)}")
@@ -798,10 +1881,11 @@ class SevenStepWizard:
                 )
                 ui.label("|").classes("text-gray-300 self-center")
                 # 模拟按钮
-                glass_button("📋 加载示例数据", lambda: run_test_with_data(True))
-                ui.button("⚠ 不合理示例", on_click=lambda: run_test_with_data(False)).classes(
+                glass_button("⚡ 快速填充（合理）", lambda: run_test_with_data(True))
+                ui.button("⚡ 快速填充（不合理）", on_click=lambda: run_test_with_data(False)).classes(
                     "bg-orange-500 hover:bg-orange-600 text-white rounded-lg px-4 py-2 text-sm"
                 )
+                ui.button(f"🤖 实时AI点评（{self._get_ai_label()}）", on_click=lambda: self.trigger_realtime_ai(1)).props('color=primary')
 
     def render_step2_cavity_balance(self):
         """Step 2: Cavity Balance Study."""
@@ -855,38 +1939,54 @@ class SevenStepWizard:
                 
                 ai_comment.clear()
                 self.fill_machine_snapshot(machine_inputs, is_reasonable)
-                
+
                 if is_reasonable:
                     # 真实案例数据 - 来自模版案例Excel (8腔模具)
                     # 型腔重量：24.83, 25.20, 25.77, 24.73, 25.33, 24.80, 24.67, 25.37
                     weights = [24.83, 25.20, 25.77, 24.73, 25.33, 24.80, 24.67, 25.37]
                     for i, w in enumerate(weights, 1):
                         cavity_inputs[i].set_value(f"{w:.2f}")
-                    
+
                     # 不平衡程度：4.27%（略超3%标准，但仍可接受）
-                    with ai_comment:
-                        glass_alert(
-                            "🤖 AI点评（PA6真实案例 - 8腔模具）：\n\n"
-                            "✓ 8个型腔短射重量范围：24.67g ~ 25.77g\n"
-                            "✓ 最大差异1.1g，不平衡度约4.27%\n"
-                            "⚠ 略超3%推荐标准，但属于可接受范围\n"
-                            "📊 模号：TG34724342-07，1+1型腔\n"
-                            "💡 建议：如需提升平衡度，可微调热流道温度",
-                            "success"
-                        )
+                    def _mock_local_cavity_ok():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                "🤖 Mock AI点评（PA6真实案例 - 8腔模具）：\n\n"
+                                "✓ 8个型腔短射重量范围：24.67g ~ 25.77g\n"
+                                "✓ 最大差异1.1g，不平衡度约4.27%\n"
+                                "⚠ 略超3%推荐标准，但属于可接受范围\n"
+                                "📊 模号：TG34724342-07，1+1型腔\n"
+                                "💡 建议：如需提升平衡度，可微调热流道温度",
+                                "success"
+                            )
+                    try:
+                        self.session.cavity_weights = {i: float(weights[i-1]) for i in range(1, 9)}
+                    except Exception:
+                        pass
+                    self._set_pending_ai(2, ai_comment, _mock_local_cavity_ok)
+                    _mock_local_cavity_ok()
                 else:
                     weights = [10.50, 9.20, 10.80, 9.00, 10.30, 8.90, 10.60, 9.10]
                     for i, w in enumerate(weights, 1):
                         cavity_inputs[i].set_value(f"{w:.2f}")
                     
-                    with ai_comment:
-                        glass_alert(
-                            "🤖 AI点评（不合理数据）：\n\n"
-                            "✗ 型腔重量差异达1.9g，平衡度仅82%\n"
-                            "✗ 远腔重量偏高，近腔偏低，流道设计不均\n"
-                            "⚠ 建议：检查热流道温度，调整浇口尺寸",
-                            "error"
-                        )
+                    def _mock_local_cavity_bad():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                "🤖 Mock AI点评（不合理数据）：\n\n"
+                                "✗ 型腔重量差异达1.9g，平衡度仅82%\n"
+                                "✗ 远腔重量偏高，近腔偏低，流道设计不均\n"
+                                "⚠ 建议：检查热流道温度，调整浇口尺寸",
+                                "error"
+                            )
+                    try:
+                        self.session.cavity_weights = {i: float(weights[i-1]) for i in range(1, 9)}
+                    except Exception:
+                        pass
+                    self._set_pending_ai(2, ai_comment, _mock_local_cavity_bad)
+                    _mock_local_cavity_bad()
                 
                 pressures = [w * 10 for w in weights]
                 balance_ratio = cavity_balance(pressures)
@@ -895,66 +1995,60 @@ class SevenStepWizard:
                 full_shot_weights = {i: w * 2 * (1 + random.uniform(-0.01, 0.01)) for i, w in enumerate(weights, 1)}
                 visual_data = {i: visual_inputs[i].value for i in range(1, 9)}
                 
-                self.session.set_step2_result(
-                    balance_ratio, 
-                    {i: weights[i-1] for i in range(1, 9)}, 
-                    cavity_weights_full=full_shot_weights,
-                    visual_checks=visual_data
-                )
-                
-                # Set data quality
-                all_ok = all(v == "OK" for v in visual_data.values())
-                self.session.set_step_quality(2, is_reasonable and all_ok)
-                
-                status = "✓ 平衡良好" if balance_ratio > 0.95 and all_ok else "⚠ 需要优化"
-                result_label.set_text(f"{status}\n平衡度: {balance_ratio*100:.1f}%\n最大: {max(weights):.2f}g | 最小: {min(weights):.2f}g")
-                result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
-                result_label.classes(add="text-emerald-600" if balance_ratio > 0.95 else "text-yellow-600")
-                
-                fig = go.Figure()
-                colors = ['#10b981' if is_reasonable else ('#ef4444' if w < 9.5 or w > 10.5 else '#f59e0b') for w in weights]
-                fig.add_trace(go.Bar(x=[f"腔{i}" for i in range(1, 9)], y=weights, marker_color=colors))
-                fig.add_hline(y=sum(weights)/8, line_dash="dash", line_color="blue", annotation_text="平均值")
-                
-                # 设置 y 轴范围从 min-1 开始，显性化差异
-                y_min = min(weights) - 1
-                y_max = max(weights) + 1
-                fig.update_layout(
-                    title="型腔重量分布", 
-                    xaxis_title="型腔", 
-                    yaxis_title="重量 (g)", 
-                    yaxis_range=[y_min, y_max],
-                    template="plotly_white", 
-                    height=400
-                )
-                
-                chart_container.clear()
-                with chart_container:
-                    ui.plotly(fig).classes('w-full')
-                
-                # Update progress indicator
-                self.update_progress_indicator()
-                ui.notify(f"✓ 步骤2完成", type='positive' if is_reasonable else 'warning')
+                def _finalize_step2(assessment=None):
+                    self.session.set_step2_result(
+                        balance_ratio,
+                        {i: weights[i-1] for i in range(1, 9)},
+                        cavity_weights_full=full_shot_weights,
+                        visual_checks=visual_data
+                    )
+
+                    # Set data quality
+                    all_ok = all(v == "OK" for v in visual_data.values())
+                    self.session.set_step_quality(2, is_reasonable and all_ok)
+
+                    status = "✓ 平衡良好" if balance_ratio > 0.95 and all_ok else "⚠ 需要优化"
+                    result_label.set_text(f"{status}\n平衡度: {balance_ratio*100:.1f}%\n最大: {max(weights):.2f}g | 最小: {min(weights):.2f}g")
+                    result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
+                    result_label.classes(add="text-emerald-600" if balance_ratio > 0.95 else "text-yellow-600")
+
+                    fig = go.Figure()
+                    colors = ['#10b981' if is_reasonable else ('#ef4444' if w < 9.5 or w > 10.5 else '#f59e0b') for w in weights]
+                    fig.add_trace(go.Bar(x=[f"腔{i}" for i in range(1, 9)], y=weights, marker_color=colors))
+                    fig.add_hline(y=sum(weights)/8, line_dash="dash", line_color="blue", annotation_text="平均值")
+
+                    # 设置 y 轴范围从 min-1 开始，显性化差异
+                    y_min = min(weights) - 1
+                    y_max = max(weights) + 1
+                    fig.update_layout(
+                        title="型腔重量分布",
+                        xaxis_title="型腔",
+                        yaxis_title="重量 (g)",
+                        yaxis_range=[y_min, y_max],
+                        template="plotly_white",
+                        height=400
+                    )
+
+                    chart_container.clear()
+                    with chart_container:
+                        ui.plotly(fig).classes('w-full')
+
+                    # Note: progress indicator will be updated when clicking 'Next' and confirming
+                    ui.notify(f"✓ 步骤2数据已填充", type='positive' if is_reasonable else 'warning')
+
+                _finalize_step2()
             
-            # Track reasonable state for this step
-            step2_is_reasonable = True
-            
+            # Track reasonable state for this step - confirmation dialog will be shown when clicking "Next"
             async def run_unreasonable_test():
-                nonlocal step2_is_reasonable
-                step2_is_reasonable = False
                 await run_test_with_data(False)
-                # Show confirmation dialog for unreasonable data
-                await self.show_unreasonable_data_dialog(
-                    step=2,
-                    data_issue="型腔重量差异超过5%，平衡度不合格",
-                    on_continue=lambda: ui.notify("已记录备注，继续下一步", type='info')
-                )
+                ui.notify("已填充不合理测试数据，点击'下一步'时将要求确认偏离原因", type='warning')
             
             with ui.row().classes('gap-4 mt-4'):
-                glass_button("✓ 合理模拟数值", lambda: run_test_with_data(True))
-                ui.button("✗ 不合理模拟数值", on_click=run_unreasonable_test).classes(
+                glass_button("⚡ 快速填充（合理）", lambda: run_test_with_data(True))
+                ui.button("⚡ 快速填充（不合理）", on_click=run_unreasonable_test).classes(
                     "bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg px-6 py-3"
                 )
+                ui.button(f"🤖 实时AI点评（{self._get_ai_label()}）", on_click=lambda: self.trigger_realtime_ai(2)).props('color=primary')
     
     def render_step3_pressure_drop(self):
         """Step 3: Pressure Drop Study."""
@@ -1008,33 +2102,41 @@ class SevenStepWizard:
                     max_pressure_input.set_value("217")
                     peak_pressure_input.set_value("107")
                     
-                    with ai_comment:
-                        glass_alert(
-                            "🤖 AI点评（PA6真实案例 - YIZUMI 260T）：\n\n"
-                            "✓ 机器最大注塑压力：217.1 MPa\n"
-                            "✓ 实际V/P点峰值压力：107 MPa（106.7 Bar）\n"
-                            "✓ 压力利用率49%，余量充足（110 MPa）\n"
-                            "📊 压力损失分布：\n"
-                            "   • 喷嘴: 24.3 Bar\n"
-                            "   • 流道: 28.2 Bar\n"
-                            "   • 浇口: 55 Bar\n"
-                            "   • 50%产品: 77.3 Bar\n"
-                            "   • V/P点: 106.7 Bar",
-                            "success"
-                        )
+                    def _mock_local_pressure_ok():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                "🤖 Mock AI点评（PA6真实案例 - YIZUMI 260T）：\n\n"
+                                "✓ 机器最大注塑压力：217.1 MPa\n"
+                                "✓ 实际V/P点峰值压力：107 MPa（106.7 Bar）\n"
+                                "✓ 压力利用率49%，余量充足（110 MPa）\n"
+                                "📊 压力损失分布：\n"
+                                "   • 喷嘴: 24.3 Bar\n"
+                                "   • 流道: 28.2 Bar\n"
+                                "   • 浇口: 55 Bar\n"
+                                "   • 50%产品: 77.3 Bar\n"
+                                "   • V/P点: 106.7 Bar",
+                                "success"
+                            )
+                    self._set_pending_ai(3, ai_comment, _mock_local_pressure_ok)
+                    _mock_local_pressure_ok()
                 else:
                     max_p, peak_p = 180, 172
                     max_pressure_input.set_value("180")
                     peak_pressure_input.set_value("172")
                     
-                    with ai_comment:
-                        glass_alert(
-                            "🤖 AI点评（不合理数据）：\n\n"
-                            "✗ 压力利用率96%，几乎无余量！\n"
-                            "✗ 材料波动可能导致欠注或报警\n"
-                            "⚠ 建议：降低射速或更换大机器",
-                            "error"
-                        )
+                    def _mock_local_pressure_bad():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                "🤖 Mock AI点评（不合理数据）：\n\n"
+                                "✗ 压力利用率96%，几乎无余量！\n"
+                                "✗ 材料波动可能导致欠注或报警\n"
+                                "⚠ 建议：降低射速或更换大机器",
+                                "error"
+                            )
+                    self._set_pending_ai(3, ai_comment, _mock_local_pressure_bad)
+                    _mock_local_pressure_bad()
                 
                 result = calculate_pressure_margin(max_p, peak_p)
                 
@@ -1043,39 +2145,33 @@ class SevenStepWizard:
                     'positions': ["Nozzle", "Runner", "Gate", "Part_50%", "Part_99%"],
                     'pressures': [24.3, 28.2, 55.0, 77.3, 106.7] if is_reasonable else [30, 60, 100, 140, 172]
                 }
-                self.session.set_step3_result(result['margin'], result['is_limited'], detailed_data=detailed_pressures)
-                
-                # Set data quality
-                self.session.set_step_quality(3, is_reasonable)
-                
-                status_icon = "✓" if not result['is_limited'] else "⚠"
-                result_label.set_text(f"{status_icon} {result['status']}\n压力余量: {result['margin']:.1f} MPa\n压力利用率: {result['utilization_percent']:.1f}%")
-                result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
-                result_label.classes(add="text-emerald-600" if not result['is_limited'] else "text-red-600")
-                
-                # Update progress indicator
-                self.update_progress_indicator()
-                ui.notify(f"✓ 步骤3完成", type='positive' if is_reasonable else 'warning')
+                def _finalize_step3(assessment=None):
+                    self.session.set_step3_result(result['margin'], result['is_limited'], detailed_data=detailed_pressures)
+
+                    # Set data quality
+                    self.session.set_step_quality(3, is_reasonable)
+
+                    status_icon = "✓" if not result['is_limited'] else "⚠"
+                    result_label.set_text(f"{status_icon} {result['status']}\n压力余量: {result['margin']:.1f} MPa\n压力利用率: {result['utilization_percent']:.1f}%")
+                    result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
+                    result_label.classes(add="text-emerald-600" if not result['is_limited'] else "text-red-600")
+
+                    # Note: progress indicator will be updated when clicking 'Next' and confirming
+                    ui.notify(f"✓ 步骤3数据已填充", type='positive' if is_reasonable else 'warning')
+
+                _finalize_step3()
             
-            # Track reasonable state for this step
-            step3_is_reasonable = True
-            
+            # Track reasonable state for this step - confirmation dialog will be shown when clicking "Next"
             async def run_unreasonable_test():
-                nonlocal step3_is_reasonable
-                step3_is_reasonable = False
                 await run_test_with_data(False)
-                # Show confirmation dialog for unreasonable data
-                await self.show_unreasonable_data_dialog(
-                    step=3,
-                    data_issue="压力利用率96%，几乎无安全余量，材料波动可能导致欠注",
-                    on_continue=lambda: ui.notify("已记录备注，继续下一步", type='info')
-                )
+                ui.notify("已填充不合理测试数据，点击'下一步'时将要求确认偏离原因", type='warning')
             
             with ui.row().classes('gap-4 mt-4'):
                 glass_button("✓ 合理模拟数值", lambda: run_test_with_data(True))
                 ui.button("✗ 不合理模拟数值", on_click=run_unreasonable_test).classes(
                     "bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg px-6 py-3"
                 )
+                ui.button(f"🤖 实时AI点评（{self._get_ai_label()}）", on_click=lambda: self.trigger_realtime_ai(3)).props('color=primary')
     
     def render_step4_process_window(self):
         """Step 4: Process Window (O-Window)."""
@@ -1118,20 +2214,24 @@ class SevenStepWizard:
                     min_temp_input.set_value("230")
                     max_temp_input.set_value("260")
                     
-                    with ai_comment:
-                        glass_alert(
-                            "🤖 AI点评（PA6真实案例 - 工艺窗口）：\n\n"
-                            "✓ 工艺窗口：40-60 Bar（宽度20 Bar）\n"
-                            "✓ 推荐保压：50 Bar（窗口中值）\n"
-                            "✓ 低于40 Bar产品缩水，高于60 Bar产品披风\n"
-                            "📊 测试保压时间15s，产品重量变化：\n"
-                            "   • 30 Bar: 329.2g (缩水)\n"
-                            "   • 40 Bar: 331.5g (OK)\n"
-                            "   • 50 Bar: 335.6g (OK)\n"
-                            "   • 60 Bar: 336.4g (OK)\n"
-                            "   • 70 Bar: 339.1g (披风)",
-                            "success"
-                        )
+                    def _mock_local_window_ok():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                "🤖 Mock AI点评（PA6真实案例 - 工艺窗口）：\n\n"
+                                "✓ 工艺窗口：40-60 Bar（宽度20 Bar）\n"
+                                "✓ 推荐保压：50 Bar（窗口中值）\n"
+                                "✓ 低于40 Bar产品缩水，高于60 Bar产品披风\n"
+                                "📊 测试保压时间15s，产品重量变化：\n"
+                                "   • 30 Bar: 329.2g (缩水)\n"
+                                "   • 40 Bar: 331.5g (OK)\n"
+                                "   • 50 Bar: 335.6g (OK)\n"
+                                "   • 60 Bar: 336.4g (OK)\n"
+                                "   • 70 Bar: 339.1g (披风)",
+                                "success"
+                            )
+                    self._set_pending_ai(4, ai_comment, _mock_local_window_ok)
+                    _mock_local_window_ok()
                 else:
                     test_points = [
                         {'holding_pressure': 55, 'temperature': 235, 'appearance_status': 'short', 'product_weight': 320.0},
@@ -1143,66 +2243,65 @@ class SevenStepWizard:
                     min_temp_input.set_value("235")
                     max_temp_input.set_value("245")
                     
-                    with ai_comment:
-                        glass_alert(
-                            "🤖 AI点评（不合理数据）：\n\n"
-                            "✗ 工艺窗口仅4MPa，属于极窄窗口！\n"
-                            "✗ 参数波动易导致短射或飞边\n"
-                            "⚠ 建议：优化壁厚设计，调整浇口位置",
-                            "error"
-                        )
+                    def _mock_local_window_bad():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                "🤖 Mock AI点评（不合理数据）：\n\n"
+                                "✗ 工艺窗口仅4MPa，属于极窄窗口！\n"
+                                "✗ 参数波动易导致短射或飞边\n"
+                                "⚠ 建议：优化壁厚设计，调整浇口位置",
+                                "error"
+                            )
+                    self._set_pending_ai(4, ai_comment, _mock_local_window_bad)
+                    _mock_local_window_bad()
                 
                 window = find_process_window_center(test_points)
                 
                 if window['status'] == 'found':
                     optimal_pressure = window['center_pressure']
-                    self.session.set_step4_result(optimal_pressure, window, raw_data=test_points)
-                    
-                    status = "✓ 窗口良好" if is_reasonable else "⚠ 窗口过窄"
-                    result_label.set_text(f"{status}\n推荐保压: {optimal_pressure:.1f} MPa\n窗口大小: {window['window_size']:.1f} MPa")
-                    # Set data quality
-                    self.session.set_step_quality(4, is_reasonable)
-                    
-                    result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
-                    result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
-                    
-                    fig = go.Figure()
-                    for status_type, color, name in [('short', 'blue', '短射'), ('ok', 'green', 'OK'), ('flash', 'red', '飞边')]:
-                        pts = [p for p in test_points if p['appearance_status'] == status_type]
-                        if pts:
-                            fig.add_trace(go.Scatter(x=[p['temperature'] for p in pts], y=[p['holding_pressure'] for p in pts],
-                                mode='markers', name=name, marker=dict(color=color, size=12)))
-                    fig.add_trace(go.Scatter(x=[window['center_temperature']], y=[window['center_pressure']],
-                        mode='markers', name='推荐点', marker=dict(color='gold', size=18, symbol='star', line=dict(width=2, color='black'))))
-                    fig.update_layout(title="工艺窗口 (O-Window)", xaxis_title="温度 (°C)", yaxis_title="保压 (MPa)", template="plotly_white", height=400)
-                    
-                    chart_container.clear()
-                    with chart_container:
-                        ui.plotly(fig).classes('w-full')
-                    
-                    # Update progress indicator
-                    self.update_progress_indicator()
-                    ui.notify(f"✓ 步骤4完成", type='positive' if is_reasonable else 'warning')
+
+                    def _finalize_step4(assessment=None):
+                        self.session.set_step4_result(optimal_pressure, window, raw_data=test_points)
+
+                        status = "✓ 窗口良好" if is_reasonable else "⚠ 窗口过窄"
+                        result_label.set_text(f"{status}\n推荐保压: {optimal_pressure:.1f} MPa\n窗口大小: {window['window_size']:.1f} MPa")
+                        # Set data quality
+                        self.session.set_step_quality(4, is_reasonable)
+
+                        result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
+                        result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
+
+                        fig = go.Figure()
+                        for status_type, color, name in [('short', 'blue', '短射'), ('ok', 'green', 'OK'), ('flash', 'red', '飞边')]:
+                            pts = [p for p in test_points if p['appearance_status'] == status_type]
+                            if pts:
+                                fig.add_trace(go.Scatter(x=[p['temperature'] for p in pts], y=[p['holding_pressure'] for p in pts],
+                                    mode='markers', name=name, marker=dict(color=color, size=12)))
+                        fig.add_trace(go.Scatter(x=[window['center_temperature']], y=[window['center_pressure']],
+                            mode='markers', name='推荐点', marker=dict(color='gold', size=18, symbol='star', line=dict(width=2, color='black'))))
+                        fig.update_layout(title="工艺窗口 (O-Window)", xaxis_title="温度 (°C)", yaxis_title="保压 (MPa)", template="plotly_white", height=400)
+
+                        chart_container.clear()
+                        with chart_container:
+                            ui.plotly(fig).classes('w-full')
+
+                        # Note: progress indicator will be updated when clicking 'Next' and confirming
+                        ui.notify(f"✓ 步骤4数据已填充", type='positive' if is_reasonable else 'warning')
+
+                    _finalize_step4()
             
-            # Track reasonable state for this step
-            step4_is_reasonable = True
-            
+            # Track reasonable state for this step - confirmation dialog will be shown when clicking "Next"
             async def run_unreasonable_test():
-                nonlocal step4_is_reasonable
-                step4_is_reasonable = False
                 await run_test_with_data(False)
-                # Show confirmation dialog for unreasonable data
-                await self.show_unreasonable_data_dialog(
-                    step=4,
-                    data_issue="工艺窗口仅4MPa，属于极窄窗口，参数波动易导致短射或飞边",
-                    on_continue=lambda: ui.notify("已记录备注，继续下一步", type='info')
-                )
+                ui.notify("已填充不合理测试数据，点击'下一步'时将要求确认偏离原因", type='warning')
             
             with ui.row().classes('gap-4 mt-4'):
                 glass_button("✓ 合理模拟数值", lambda: run_test_with_data(True))
                 ui.button("✗ 不合理模拟数值", on_click=run_unreasonable_test).classes(
                     "bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg px-6 py-3"
                 )
+                ui.button(f"🤖 实时AI点评（{self._get_ai_label()}）", on_click=lambda: self.trigger_realtime_ai(4)).props('color=primary')
     
     def render_step5_gate_seal(self):
         """Step 5: Gate Seal Study."""
@@ -1258,32 +2357,40 @@ class SevenStepWizard:
                     times_input.set_value("3,4,5,6,7,8,9,10,11,12,13")
                     weights_input.set_value("327.2,328.54,330.92,332.96,333.5,334.02,334.65,335.2,335.5,335.7,335.7")
                     
-                    with ai_comment:
-                        glass_alert(
-                            "🤖 AI点评（PA6真实案例 - 浇口冻结）：\n\n"
-                            "✓ 测试保压时间：3-13秒（共11个测试点）\n"
-                            "✓ 浇口冻结时间：12秒（重量稳定在335.7g）\n"
-                            "✓ 推荐保压时间：13秒（冻结时间+1秒余量）\n"
-                            "📊 重量变化曲线：\n"
-                            "   • 3s: 327.2g → 12s: 335.7g（增重8.5g）\n"
-                            "   • 12-13s重量不变，确认浇口已完全冻结\n"
-                            "💡 典型S型曲线，冻结点明确",
-                            "success"
-                        )
+                    def _mock_local_gate_ok():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                "🤖 Mock AI点评（PA6真实案例 - 浇口冻结）：\n\n"
+                                "✓ 测试保压时间：3-13秒（共11个测试点）\n"
+                                "✓ 浇口冻结时间：12秒（重量稳定在335.7g）\n"
+                                "✓ 推荐保压时间：13秒（冻结时间+1秒余量）\n"
+                                "📊 重量变化曲线：\n"
+                                "   • 3s: 327.2g → 12s: 335.7g（增重8.5g）\n"
+                                "   • 12-13s重量不变，确认浇口已完全冻结\n"
+                                "💡 典型S型曲线，冻结点明确",
+                                "success"
+                            )
+                    self._set_pending_ai(5, ai_comment, _mock_local_gate_ok)
+                    _mock_local_gate_ok()
                 else:
                     times = [1, 2, 3, 4, 5, 6]
                     weights = [9.0, 9.3, 9.6, 9.8, 9.95, 10.1]
                     times_input.set_value("1,2,3,4,5,6")
                     weights_input.set_value("9.0,9.3,9.6,9.8,9.95,10.1")
                     
-                    with ai_comment:
-                        glass_alert(
-                            "🤖 AI点评（不合理数据）：\n\n"
-                            "✗ 6秒时重量仍在上升，浇口尚未冻结\n"
-                            "✗ 可能原因：浇口过大、模温过高\n"
-                            "⚠ 建议：延长测试至8-10秒",
-                            "error"
-                        )
+                    def _mock_local_gate_bad():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                "🤖 Mock AI点评（不合理数据）：\n\n"
+                                "✗ 6秒时重量仍在上升，浇口尚未冻结\n"
+                                "✗ 可能原因：浇口过大、模温过高\n"
+                                "⚠ 建议：延长测试至8-10秒",
+                                "error"
+                            )
+                    self._set_pending_ai(5, ai_comment, _mock_local_gate_bad)
+                    _mock_local_gate_bad()
                 
                 freeze_result = detect_gate_freeze_time(times, weights)
                 freeze_time = freeze_result.get('freeze_time') or times[-1]
@@ -1291,49 +2398,44 @@ class SevenStepWizard:
                 
                 # Format data for report
                 seal_curve = [{'hold_time': t, 'weight': w} for t, w in zip(times, weights)]
-                self.session.set_step5_result(freeze_time, seal_curve)
-                
-                status = "✓ 冻结点明确" if is_reasonable else "⚠ 需延长测试"
-                result_label.set_text(f"{status}\n浇口冻结时间: {freeze_time:.1f}s\n推荐保压时间: {recommended_time:.1f}s")
-                # Set data quality
-                self.session.set_step_quality(5, is_reasonable)
-                
-                result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
-                result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
-                
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=times, y=weights, mode='lines+markers', name='重量曲线',
-                    line=dict(color='#3b82f6' if is_reasonable else '#ef4444', width=2)))
-                fig.add_vline(x=freeze_time, line_dash="dash", line_color="red", annotation_text="冻结点")
-                fig.update_layout(title="浇口冻结曲线", xaxis_title="保压时间 (s)", yaxis_title="重量 (g)", template="plotly_white", height=400)
-                
-                chart_container.clear()
-                with chart_container:
-                    ui.plotly(fig).classes('w-full')
-                
-                # Update progress indicator
-                self.update_progress_indicator()
-                ui.notify(f"✓ 步骤5完成", type='positive' if is_reasonable else 'warning')
+
+                def _finalize_step5(assessment=None):
+                    self.session.set_step5_result(freeze_time, seal_curve)
+
+                    status = "✓ 冻结点明确" if is_reasonable else "⚠ 需延长测试"
+                    result_label.set_text(f"{status}\n浇口冻结时间: {freeze_time:.1f}s\n推荐保压时间: {recommended_time:.1f}s")
+                    # Set data quality
+                    self.session.set_step_quality(5, is_reasonable)
+
+                    result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
+                    result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
+
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=times, y=weights, mode='lines+markers', name='重量曲线',
+                        line=dict(color='#3b82f6' if is_reasonable else '#ef4444', width=2)))
+                    fig.add_vline(x=freeze_time, line_dash="dash", line_color="red", annotation_text="冻结点")
+                    fig.update_layout(title="浇口冻结曲线", xaxis_title="保压时间 (s)", yaxis_title="重量 (g)", template="plotly_white", height=400)
+
+                    chart_container.clear()
+                    with chart_container:
+                        ui.plotly(fig).classes('w-full')
+
+                    # Note: progress indicator will be updated when clicking 'Next' and confirming
+                    ui.notify(f"✓ 步骤5数据已填充", type='positive' if is_reasonable else 'warning')
+
+                _finalize_step5()
             
-            # Track reasonable state for this step
-            step5_is_reasonable = True
-            
+            # Track reasonable state for this step - confirmation dialog will be shown when clicking "Next"
             async def run_unreasonable_test():
-                nonlocal step5_is_reasonable
-                step5_is_reasonable = False
                 await run_test_with_data(False)
-                # Show confirmation dialog for unreasonable data
-                await self.show_unreasonable_data_dialog(
-                    step=5,
-                    data_issue="6秒时重量仍在上升，浇口尚未完全冻结，需延长测试时间",
-                    on_continue=lambda: ui.notify("已记录备注，继续下一步", type='info')
-                )
+                ui.notify("已填充不合理测试数据，点击'下一步'时将要求确认偏离原因", type='warning')
             
             with ui.row().classes('gap-4 mt-4'):
-                glass_button("✓ 合理模拟数值", lambda: run_test_with_data(True))
-                ui.button("✗ 不合理模拟数值", on_click=run_unreasonable_test).classes(
+                glass_button("⚡ 快速填充（合理）", lambda: run_test_with_data(True))
+                ui.button("⚡ 快速填充（不合理）", on_click=run_unreasonable_test).classes(
                     "bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg px-6 py-3"
                 )
+                ui.button(f"🤖 实时AI点评（{self._get_ai_label()}）", on_click=lambda: self.trigger_realtime_ai(5)).props('color=primary')
     
     def render_step6_cooling(self):
         """Step 6: Cooling Time Optimization."""
@@ -1392,19 +2494,23 @@ class SevenStepWizard:
                     recommended = max(cooling_time, min_holding + 2)
                     cycle_time = recommended + min_holding + 3  # 填充+保压+冷却+开合模
                     
-                    with ai_comment:
-                        glass_alert(
-                            f"🤖 AI点评（PA6真实案例 - 冷却优化）：\n\n"
-                            f"✓ 冷却时间：{cooling_time}秒\n"
-                            f"✓ 顶出温度：{ejection_temp}°C（接近PA6热变形温度）\n"
-                            f"✓ 保压时间：{min_holding:.0f}秒（来自步骤5）\n"
-                            f"📊 模温设置：\n"
-                            "   • 前模: 60°C\n"
-                            "   • 后模: 14°C\n"
-                            "   • 滑块: 60°C\n"
-                            f"💡 预估周期时间：约{cycle_time:.0f}秒",
-                            "success"
-                        )
+                    def _mock_local_cooling_ok():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                f"🤖 Mock AI点评（PA6真实案例 - 冷却优化）：\n\n"
+                                f"✓ 冷却时间：{cooling_time}秒\n"
+                                f"✓ 顶出温度：{ejection_temp}°C（接近PA6热变形温度）\n"
+                                f"✓ 保压时间：{min_holding:.0f}秒（来自步骤5）\n"
+                                f"📊 模温设置：\n"
+                                "   • 前模: 60°C\n"
+                                "   • 后模: 14°C\n"
+                                "   • 滑块: 60°C\n"
+                                f"💡 预估周期时间：约{cycle_time:.0f}秒",
+                                "success"
+                            )
+                    self._set_pending_ai(6, ai_comment, _mock_local_cooling_ok)
+                    _mock_local_cooling_ok()
                 else:
                     ejection_temp = 110
                     cooling_time = 6
@@ -1414,14 +2520,18 @@ class SevenStepWizard:
                     recommended = max(cooling_time, min_holding + 2)
                     cycle_time = recommended + min_holding + 3
                     
-                    with ai_comment:
-                        glass_alert(
-                            f"🤖 AI点评（不合理数据）：\n\n"
-                            f"✗ 冷却仅{cooling_time}s，产品可能未固化\n"
-                            f"✗ 顶出温度{ejection_temp}°C过高！\n"
-                            "⚠ 建议：增加冷却至12-15s",
-                            "error"
-                        )
+                    def _mock_local_cooling_bad():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                f"🤖 Mock AI点评（不合理数据）：\n\n"
+                                f"✗ 冷却仅{cooling_time}s，产品可能未固化\n"
+                                f"✗ 顶出温度{ejection_temp}°C过高！\n"
+                                "⚠ 建议：增加冷却至12-15s",
+                                "error"
+                            )
+                    self._set_pending_ai(6, ai_comment, _mock_local_cooling_bad)
+                    _mock_local_cooling_bad()
                 
                 # Format data for report - Mocking a curve since Step 6 UI only has 1 point
                 mock_cooling_curve = [
@@ -1429,39 +2539,34 @@ class SevenStepWizard:
                     {'cooling_time': recommended, 'part_temp': ejection_temp, 'deformation': 0.08},
                     {'cooling_time': recommended + 5, 'part_temp': ejection_temp - 5, 'deformation': 0.05}
                 ]
-                self.session.set_step6_result(recommended, mock_cooling_curve)
-                
-                # Set data quality
-                self.session.set_step_quality(6, is_reasonable)
-                
-                status = "✓ 冷却优化" if is_reasonable else "⚠ 参数需调整"
-                result_label.set_text(f"{status}\n推荐冷却时间: {recommended:.1f}s\n预估周期: {cycle_time:.1f}s")
-                result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
-                result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
-                
-                # Update progress indicator
-                self.update_progress_indicator()
-                ui.notify("✓ 步骤6完成，请继续步骤7（锁模力优化）" if is_reasonable else "⚠ 步骤6完成，但建议调整参数", type='positive' if is_reasonable else 'warning')
+
+                def _finalize_step6(assessment=None):
+                    self.session.set_step6_result(recommended, mock_cooling_curve)
+
+                    # Set data quality
+                    self.session.set_step_quality(6, is_reasonable)
+
+                    status = "✓ 冷却优化" if is_reasonable else "⚠ 参数需调整"
+                    result_label.set_text(f"{status}\n推荐冷却时间: {recommended:.1f}s\n预估周期: {cycle_time:.1f}s")
+                    result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
+                    result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
+
+                    # Note: progress indicator will be updated when clicking 'Next' and confirming
+                    ui.notify("✓ 步骤6数据已填充，请继续步骤7（锁模力优化）" if is_reasonable else "⚠ 步骤6数据已填充，但建议调整参数", type='positive' if is_reasonable else 'warning')
+
+                _finalize_step6()
             
-            # Track reasonable state for this step
-            step6_is_reasonable = True
-            
+            # Track reasonable state for this step - confirmation dialog will be shown when clicking "Next"
             async def run_unreasonable_test():
-                nonlocal step6_is_reasonable
-                step6_is_reasonable = False
                 await run_test_with_data(False)
-                # Show confirmation dialog for unreasonable data
-                await self.show_unreasonable_data_dialog(
-                    step=6,
-                    data_issue="冷却时间过短，产品可能未完全固化，顶出温度过高",
-                    on_continue=lambda: ui.notify("已记录备注，请继续步骤7", type='info')
-                )
+                ui.notify("已填充不合理测试数据，点击'下一步'时将要求确认偏离原因", type='warning')
             
             with ui.row().classes('gap-4 mt-4'):
-                glass_button("✓ 合理模拟数值", lambda: run_test_with_data(True))
-                ui.button("✗ 不合理模拟数值", on_click=run_unreasonable_test).classes(
+                glass_button("⚡ 快速填充（合理）", lambda: run_test_with_data(True))
+                ui.button("⚡ 快速填充（不合理）", on_click=run_unreasonable_test).classes(
                     "bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg px-6 py-3"
                 )
+                ui.button(f"🤖 实时AI点评（{self._get_ai_label()}）", on_click=lambda: self.trigger_realtime_ai(6)).props('color=primary')
     
     def render_step7_clamping_force(self):
         """Step 7: Clamping Force Optimization."""
@@ -1534,18 +2639,22 @@ class SevenStepWizard:
                     min_ok_force = 120  # 最小无飞边锁模力
                     recommended_force = int(min_ok_force * 1.15)  # 约140 Ton
                     
-                    with ai_comment:
-                        glass_alert(
-                            f"🤖 AI点评（PA6真实案例 - 锁模力优化）：\n\n"
-                            f"✓ 测试锁模力范围：100-160 Ton（共6个测试点）\n"
-                            f"✓ 最小无飞边锁模力：{min_ok_force} Ton\n"
-                            f"✓ 推荐锁模力：{recommended_force} Ton（含15%安全余量）\n"
-                            f"📊 测试结果分析：\n"
-                            f"   • 160-120 Ton: 产品OK，重量稳定305g\n"
-                            f"   • 110-100 Ton: 产品飞边，重量增加至306-308g\n"
-                            f"💡 模号: TG34724342-07，机台吨位: 280T",
-                            "success"
-                        )
+                    def _mock_local_clamp_ok():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                f"🤖 Mock AI点评（PA6真实案例 - 锁模力优化）：\n\n"
+                                f"✓ 测试锁模力范围：100-160 Ton（共6个测试点）\n"
+                                f"✓ 最小无飞边锁模力：{min_ok_force} Ton\n"
+                                f"✓ 推荐锁模力：{recommended_force} Ton（含15%安全余量）\n"
+                                f"📊 测试结果分析：\n"
+                                f"   • 160-120 Ton: 产品OK，重量稳定305g\n"
+                                f"   • 110-100 Ton: 产品飞边，重量增加至306-308g\n"
+                                f"💡 模号: TG34724342-07，机台吨位: 280T",
+                                "success"
+                            )
+                    self._set_pending_ai(7, ai_comment, _mock_local_clamp_ok)
+                    _mock_local_clamp_ok()
                 else:
                     # 不合理数据 - 锁模力过低导致严重飞边
                     forces = [80, 70, 60, 50]
@@ -1559,93 +2668,92 @@ class SevenStepWizard:
                     min_ok_force = None
                     recommended_force = 140  # 建议值
                     
-                    with ai_comment:
-                        glass_alert(
-                            f"🤖 AI点评（不合理数据）：\n\n"
-                            f"✗ 所有测试点均出现飞边！锁模力严重不足\n"
-                            f"✗ 产品重量持续增加（312→330g），熔体外溢\n"
-                            f"⚠ 建议：增加锁模力至120-160 Ton范围重新测试\n"
-                            f"⚠ 检查：分型面密封、模具磨损情况",
-                            "error"
-                        )
+                    def _mock_local_clamp_bad():
+                        ai_comment.clear()
+                        with ai_comment:
+                            glass_alert(
+                                f"🤖 Mock AI点评（不合理数据）：\n\n"
+                                f"✗ 所有测试点均出现飞边！锁模力严重不足\n"
+                                f"✗ 产品重量持续增加（312→330g），熔体外溢\n"
+                                f"⚠ 建议：增加锁模力至120-160 Ton范围重新测试\n"
+                                f"⚠ 检查：分型面密封、模具磨损情况",
+                                "error"
+                            )
+                    self._set_pending_ai(7, ai_comment, _mock_local_clamp_bad)
+                    _mock_local_clamp_bad()
                 
                 # Format data for report
                 clamping_curve = [
-                    {'clamping_force': f, 'part_weight': w, 'flash_detected': a} 
+                    {'clamping_force': f, 'part_weight': w, 'flash_detected': a}
                     for f, w, a in zip(forces, weights, appearances)
                 ]
-                self.session.set_step7_result(recommended_force, clamping_curve)
-                
-                # Set data quality
-                self.session.set_step_quality(7, is_reasonable)
-                
-                status = "✓ 锁模力优化完成" if is_reasonable else "⚠ 需要调整"
-                result_label.set_text(f"{status}\n推荐锁模力: {recommended_force} Ton\n最小无飞边: {min_ok_force or 'N/A'} Ton")
-                result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
-                result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
-                
-                # 绘制图表
-                fig = go.Figure()
-                
-                # 重量曲线
-                fig.add_trace(go.Scatter(
-                    x=forces, y=weights, 
-                    mode='lines+markers', 
-                    name='产品重量',
-                    line=dict(color='#3b82f6', width=2),
-                    marker=dict(size=10)
-                ))
-                
-                # 标记飞边点
-                flash_forces = [f for f, a in zip(forces, appearances) if a.upper() == 'FLASH']
-                flash_weights = [w for w, a in zip(weights, appearances) if a.upper() == 'FLASH']
-                if flash_forces:
+
+                def _finalize_step7(assessment=None):
+                    self.session.set_step7_result(recommended_force, clamping_curve)
+
+                    # Set data quality
+                    self.session.set_step_quality(7, is_reasonable)
+
+                    status = "✓ 锁模力优化完成" if is_reasonable else "⚠ 需要调整"
+                    result_label.set_text(f"{status}\n推荐锁模力: {recommended_force} Ton\n最小无飞边: {min_ok_force or 'N/A'} Ton")
+                    result_label.classes(remove="text-red-600 text-emerald-600 text-yellow-600")
+                    result_label.classes(add="text-emerald-600" if is_reasonable else "text-yellow-600")
+
+                    # 绘制图表
+                    fig = go.Figure()
+
+                    # 重量曲线
                     fig.add_trace(go.Scatter(
-                        x=flash_forces, y=flash_weights,
-                        mode='markers',
-                        name='飞边',
-                        marker=dict(color='red', size=15, symbol='x')
+                        x=forces, y=weights,
+                        mode='lines+markers',
+                        name='产品重量',
+                        line=dict(color='#3b82f6', width=2),
+                        marker=dict(size=10)
                     ))
-                
-                # 推荐值标记
-                fig.add_vline(x=recommended_force, line_dash="dash", line_color="green", 
-                              annotation_text=f"推荐: {recommended_force}T")
-                
-                fig.update_layout(
-                    title="锁模力优化曲线",
-                    xaxis_title="锁模力 (Ton)",
-                    yaxis_title="产品重量 (g)",
-                    template="plotly_white",
-                    height=400
-                )
-                
-                chart_container.clear()
-                with chart_container:
-                    ui.plotly(fig).classes('w-full')
-                
-                # Update progress indicator
-                self.update_progress_indicator()
-                ui.notify("🎉 七步法全部完成！" if is_reasonable else "⚠ 步骤7完成，但建议调整参数", type='positive' if is_reasonable else 'warning')
+
+                    # 标记飞边点
+                    flash_forces = [f for f, a in zip(forces, appearances) if a.upper() == 'FLASH']
+                    flash_weights = [w for w, a in zip(weights, appearances) if a.upper() == 'FLASH']
+                    if flash_forces:
+                        fig.add_trace(go.Scatter(
+                            x=flash_forces, y=flash_weights,
+                            mode='markers',
+                            name='飞边',
+                            marker=dict(color='red', size=15, symbol='x')
+                        ))
+
+                    # 推荐值标记
+                    fig.add_vline(x=recommended_force, line_dash="dash", line_color="green",
+                                  annotation_text=f"推荐: {recommended_force}T")
+
+                    fig.update_layout(
+                        title="锁模力优化曲线",
+                        xaxis_title="锁模力 (Ton)",
+                        yaxis_title="产品重量 (g)",
+                        template="plotly_white",
+                        height=400
+                    )
+
+                    chart_container.clear()
+                    with chart_container:
+                        ui.plotly(fig).classes('w-full')
+
+                    # Note: progress indicator will be updated when clicking 'Finish' and confirming
+                    ui.notify("🎉 步骤7数据已填充！" if is_reasonable else "⚠ 步骤7数据已填充，但建议调整参数", type='positive' if is_reasonable else 'warning')
+
+                _finalize_step7()
             
-            # Track reasonable state for this step
-            step7_is_reasonable = True
-            
+            # Track reasonable state for this step - confirmation dialog will be shown when clicking "Next"
             async def run_unreasonable_test():
-                nonlocal step7_is_reasonable
-                step7_is_reasonable = False
                 await run_test_with_data(False)
-                # Show confirmation dialog for unreasonable data
-                await self.show_unreasonable_data_dialog(
-                    step=7,
-                    data_issue="所有测试点均出现飞边，锁模力严重不足",
-                    on_continue=lambda: ui.notify("已记录备注，流程完成", type='info')
-                )
+                ui.notify("已填充不合理测试数据，点击'完成实验'时将要求确认", type='warning')
             
             with ui.row().classes('gap-4 mt-4'):
-                glass_button("✓ 合理模拟数值", lambda: run_test_with_data(True))
-                ui.button("✗ 不合理模拟数值", on_click=run_unreasonable_test).classes(
+                glass_button("⚡ 快速填充（合理）", lambda: run_test_with_data(True))
+                ui.button("⚡ 快速填充（不合理）", on_click=run_unreasonable_test).classes(
                     "bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg px-6 py-3"
                 )
+                ui.button(f"🤖 实时AI点评（{self._get_ai_label()}）", on_click=lambda: self.trigger_realtime_ai(7)).props('color=primary')
     
     def update_progress_indicator(self):
         """Update the progress indicator to reflect current state."""
@@ -1712,101 +2820,23 @@ class SevenStepWizard:
         with glass_container():
             ui.label("科学注塑七步法向导").classes(f"{GLASS_THEME['text_primary']} text-3xl font-bold mb-4")
 
-            # If no GEMINI_API_KEY present, prompt user to enter one (masked input)
-            existing_key = getattr(self.session, 'gemini_api_key', None) or os.getenv('GEMINI_API_KEY')
-            if not existing_key:
-                from api_key_manager import test_provider_key
-                # Show whether the optional Google GenAI SDK is installed and will be used
-                try:
-                    from gemini_client import _HAS_GENAI_SDK
-                except Exception:
-                    _HAS_GENAI_SDK = False
+            # NOTE: We already have a dedicated API configuration/test page.
+            # Do NOT auto-open an API dialog when entering this page; just show a non-blocking hint.
+            try:
+                from global_state import get_available_api_sync
+                current_api, api_key = get_available_api_sync()
+            except Exception:
+                current_api, api_key = (None, None)
 
-                providers = ['Gemini', 'OpenAI', 'Claude', 'Deepseek']
-                api_inputs = {}
-                test_results = {}
-                test_passed = {}
-
-                with ui.dialog() as key_dialog, ui.card().classes('w-96'):
-                    ui.label('🔐 配置 API Key').classes('text-lg font-bold')
-                    ui.label('为不同模型提供商粘贴 API key，输入时为密码样式。点击对应的“测试”按钮验证可用性。').classes('text-sm text-gray-500')
-                    # SDK availability indicator
-                    sdk_text = '可用' if _HAS_GENAI_SDK else '不可用'
-                    # Show as neutral, non-clickable text (remove link-like styling)
-                    ui.label(f'Google GenAI SDK: {sdk_text}').classes('text-sm text-gray-600')
-
-                    for p in providers:
-                        with ui.row().classes('items-center gap-2'):
-                            # Use NiceGUI password prop to mask characters
-                            api_inputs[p] = ui.input(label=f'{p} API Key').props('password').classes('w-64')
-                            test_label = ui.label('').classes('text-sm')
-                            test_results[p] = test_label
-                            test_passed[p] = False
-
-                            def make_tester(provider, input_widget, result_label):
-                                def on_test():
-                                    key_val = input_widget.value.strip() if input_widget.value else ''
-                                    # Indicate SDK usage for Gemini when available
-                                    try:
-                                        use_sdk = (_HAS_GENAI_SDK and provider.lower() == 'gemini')
-                                    except Exception:
-                                        use_sdk = False
-
-                                    if use_sdk:
-                                        result_label.set_text('正在测试...（使用本地 Google GenAI SDK）')
-                                    else:
-                                        result_label.set_text('正在测试...')
-
-                                    success, msg = test_provider_key(provider.lower(), key_val)
-                                    test_passed[provider] = bool(success)
-                                    if success:
-                                        suffix = '（使用 SDK）' if use_sdk else ''
-                                        result_label.set_text(f'✓ {msg}{suffix}')
-                                    else:
-                                        result_label.set_text(f'✕ {msg}')
-                                return on_test
-
-                            ui.button('测试', on_click=make_tester(p, api_inputs[p], test_label)).props('outline')
-
-                    save_env = ui.checkbox('保存到 .env 文件（仅开发机，慎用）')
-                    info = ui.label('').classes('text-sm text-red-500')
-
-                    def on_confirm():
-                        # choose first provider that has a successful test; otherwise allow mock
-                        chosen = None
-                        for p in providers:
-                            if test_passed.get(p):
-                                chosen = p
-                                break
-
-                        if not chosen:
-                            info.set_text('未检测到已测试通过的 API key。请选择 Mock 或先通过测试。')
-                            return
-
-                        key_val = api_inputs[chosen].value.strip()
-                        os.environ['SELECTED_API_PROVIDER'] = chosen.lower()
-                        os.environ['SELECTED_API_KEY'] = key_val
-                        setattr(self.session, 'selected_api_provider', chosen.lower())
-                        setattr(self.session, 'selected_api_key', key_val)
-                        if save_env.value:
-                            try:
-                                with open('.env', 'a', encoding='utf-8') as f:
-                                    f.write(f"\nSELECTED_API_PROVIDER={chosen.lower()}\nSELECTED_API_KEY=\"{key_val}\"\n")
-                            except Exception as e:
-                                info.set_text(f'无法写入 .env: {e}')
-                                return
-                        key_dialog.close()
-
-                    def on_use_mock():
-                        setattr(self.session, 'selected_api_provider', 'mock')
-                        setattr(self.session, 'selected_api_key', None)
-                        key_dialog.close()
-
-                    with ui.row().classes('w-full justify-end gap-2 mt-4'):
-                        ui.button('使用 Mock AI', on_click=on_use_mock).props('flat')
-                        ui.button('确认并使用所选', on_click=on_confirm).props('color=primary')
-
-                key_dialog.open()
+            if not api_key:
+                with glass_card("🔑 API Key 提示"):
+                    glass_alert(
+                        "未检测到可用的 API Key：实时 AI 点评可能不可用。\n"
+                        "请到 Settings 页面配置并测试 API（本页不再弹出配置弹窗）。",
+                        "warning",
+                    )
+                    with ui.row().classes('gap-2'):
+                        glass_button('前往 Settings 配置', on_click=lambda: ui.navigate.to('/settings'), variant='secondary')
             
             # Progress summary with labels and connecting lines - FIXED TO TOP
             progress = self.session.get_progress_summary()
@@ -1855,8 +2885,10 @@ class SevenStepWizard:
 
                     # Otherwise proceed
                     if go_next:
+                        self.update_progress_indicator()
                         stepper.next()
                     else:
+                        self.update_progress_indicator()
                         stepper.previous()
 
                 with ui.step('准备阶段: 基础信息'):
@@ -2404,25 +3436,10 @@ class SevenStepWizard:
         self._current_report_html = report_html
         self._current_html_url = html_url
         
-        # 先尝试调用 Gemini 获取评估，失败则回退为本地 mock 并弹窗提示
+        # 生成 PDF 时不再调用实时 AI：使用流程中已保存的实时 AI 点评（若有）
         try:
-            from gemini_client import request_assessment
-            from pdf_generator_v2 import generate_brand1_report_v2
-
-            # try Gemini with provided API key from session or environment; fallback to None on failure
-            gemini_api_key = getattr(self.session, 'gemini_api_key', None) or os.getenv('GEMINI_API_KEY')
-            assessment = request_assessment(self.session, api_key=gemini_api_key)
-
-            if not assessment:
-                # show dialog to inform user and continue with mock AI
-                with ui.dialog() as d:
-                    d.add_head_html = None
-                    ui.label('gemini调用不成功，暂用mock AI')
-                    ui.button('确认', on_click=lambda *_: d.close())
-
-            # generate PDF (pass external assessment if available)
             from pdf_generator_v2 import generate_report_from_session
-            pdf_path = generate_report_from_session(self.session, external_assessment=assessment)
+            pdf_path = generate_report_from_session(self.session, external_assessment=None)
             pdf_filename = Path(pdf_path).name
             pdf_url = f'/static/{pdf_filename}'
             print(f"[PDF] Generated: {pdf_path}")

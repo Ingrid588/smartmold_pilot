@@ -5,6 +5,12 @@ PDF Generation Test Script
 """
 
 import traceback
+import warnings
+import os
+
+
+# Keep test output clean across environments
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 def test_weasyprint():
     """测试 WeasyPrint PDF 生成"""
@@ -39,8 +45,10 @@ def test_weasyprint():
         
     except Exception as e:
         print(f"❌ WeasyPrint 失败: {e}")
-        print("\n完整错误信息:")
-        traceback.print_exc()
+        # Print full trace only when explicitly requested (to keep logs clean)
+        if os.getenv('PDF_TEST_VERBOSE', '').lower() in ('1', 'true', 'yes'):
+            print("\n完整错误信息:")
+            traceback.print_exc()
         return False
 
 
@@ -91,10 +99,10 @@ def test_fpdf():
         
         pdf = FPDF()
         pdf.add_page()
-        pdf.set_font("Arial", size=24)
-        pdf.cell(200, 10, txt="Hello World", ln=True, align='C')
-        pdf.set_font("Arial", size=12)
-        pdf.cell(200, 10, txt="This is a PDF test (FPDF)", ln=True, align='C')
+        pdf.set_font("Helvetica", size=24)
+        pdf.cell(200, 10, text="Hello World", align='C', new_x='LMARGIN', new_y='NEXT')
+        pdf.set_font("Helvetica", size=12)
+        pdf.cell(200, 10, text="This is a PDF test (FPDF)", align='C', new_x='LMARGIN', new_y='NEXT')
         pdf.output("debug_report_fpdf.pdf")
         
         print("✅ Success! PDF 已保存为 debug_report_fpdf.pdf")

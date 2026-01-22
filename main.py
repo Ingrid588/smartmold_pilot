@@ -4,8 +4,13 @@ NiceGUI-based PWA with dark mode, routing, and database integration.
 """
 
 import asyncio
+import os
+import warnings
+import socket
 from datetime import datetime
 from nicegui import ui, app
+
+from global_state import app_state, get_available_api_sync, get_available_api, switch_to_next_api
 from ui_components import (
     setup_glass_theme,
     glass_background_layer,
@@ -24,18 +29,13 @@ from ui_components import (
 from db import init_db, close_db
 from models import Machine, ExperimentSession, Mold
 
+
+# Quiet common environment warning on macOS LibreSSL builds:
+# urllib3 v2 emits NotOpenSSLWarning when the ssl module is compiled with LibreSSL.
+warnings.filterwarnings('ignore', message=r"urllib3 v2 only supports OpenSSL.*")
+
 # Load Frosted Glass Theme CSS (shared across all pages)
 ui.add_head_html('<link rel="stylesheet" href="/static/frosted_glass_theme.css">', shared=True)
-
-
-# ============================================================
-# Application State
-# ============================================================
-
-app_state = {
-    "db_initialized": False,
-    "current_drawer": None,
-}
 
 
 # ============================================================
@@ -74,11 +74,31 @@ async def dashboard():
     drawer = AppDrawer()
     app_state["current_drawer"] = drawer
     
+    # Check if API is configured - if not, redirect to settings
+    from global_state import get_available_api_sync
+    current_api, api_key = get_available_api_sync()
+    if not current_api or not api_key:
+        print("[APP] No API configured, redirecting to settings...")
+        ui.navigate.to("/settings")
+        return
+    
     with glass_container():
         # Title
         with ui.row().classes("items-center gap-4 mb-4"):
             ui.label("Dashboard").classes(f"{GLASS_THEME['text_primary']} text-3xl font-bold")
             glass_button("Toggle Menu", lambda: drawer.toggle(), variant="secondary").classes("ml-auto")
+        
+        # Check API configuration status
+        from global_state import get_available_api_sync
+        current_api, api_key = get_available_api_sync()
+        if not current_api or not api_key:
+            glass_alert(
+                "⚠️ AI API 未配置\n\n"
+                "请先配置有效的 API Key 以启用实时 AI 点评功能。",
+                "warning"
+            )
+            with ui.row().classes("gap-2 mt-2"):
+                glass_button("前往设置", lambda: ui.navigate.to("/settings"), variant="primary")
         
         # Database status alert
         if app_state["db_initialized"]:
@@ -456,12 +476,12 @@ async def machine_check():
 
 
 # ============================================================
-# Page: Settings (Placeholder)
+# Page: Settings (API Configuration)
 # ============================================================
 
 @ui.page("/settings")
 async def settings():
-    """Settings page - Placeholder."""
+    """Settings page - API Key Management with failover."""
     setup_glass_theme()
     
     # Create mesh gradient background (bottom layer)
@@ -472,10 +492,311 @@ async def settings():
     
     with glass_container():
         with ui.row().classes("items-center gap-4 mb-4"):
-            ui.label("Settings").classes(f"{GLASS_THEME['text_primary']} text-3xl font-bold")
+            ui.label("⚙️ 配置 API Key").classes(f"{GLASS_THEME['text_primary']} text-3xl font-bold")
             glass_button("Toggle Menu", lambda: drawer.toggle(), variant="secondary").classes("ml-auto")
         
-        glass_alert("⚙️ Settings Page - Coming Soon", "info")
+        # Show current API error if any
+        if app_state["api_error_message"]:
+            glass_alert(f"✗ {app_state['api_error_message']}", "error")
+        
+        # Current API status
+        current_api_display = ui.label(
+            f"当前 API: {app_state['current_api'].upper() if app_state['current_api'] else '未选择'}"
+        ).classes(f"{GLASS_THEME['text_primary']} text-lg font-semibold mb-4")
+        
+        # API Key Configuration
+        with glass_card("🔑 配置 API Key"):
+            ui.label("为不同模型提供商贴上 API key，输入时为密码样式。点击对应的'测试'按钮验证可用性。").classes(f"{GLASS_THEME['text_secondary']} text-sm mb-4")
+
+            # OpenAI model selection (used by Scientific Molding realtime comments)
+            openai_model_input = glass_input(
+                "OpenAI Model（用于实时点评）",
+                placeholder="例如: gpt-4o-mini / gpt-4.1-mini",
+                value=os.getenv('OPENAI_MODEL') or 'gpt-4o-mini',
+            ).classes('mb-2')
+            ui.label("提示：如果 API 测试通过但实时点评失败，通常是模型名不可用；请在此调整模型再测试。")\
+                .classes(f"{GLASS_THEME['text_secondary']} text-xs mb-4")
+            
+            # API Test Results Storage
+            api_test_results = {}
+            last_ok_provider = {"name": None}
+            
+            # Function to test API
+            def test_api(api_name, api_key):
+                if not api_key.strip():
+                    return "❌ Please enter an API Key"
+                
+                try:
+                    import requests
+                    
+                    # Configure proxy if available
+                    proxies = None
+                    if os.getenv('HTTP_PROXY') or os.getenv('HTTPS_PROXY'):
+                        proxies = {
+                            'http': os.getenv('HTTP_PROXY'),
+                            'https': os.getenv('HTTPS_PROXY'),
+                        }
+                    
+                    if api_name == "openai":
+                        headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        }
+                        # Test the same endpoint used by realtime comments to avoid “models ok but chat fails”.
+                        model_name = (openai_model_input.value or '').strip() or (os.getenv('OPENAI_MODEL') or 'gpt-4o-mini')
+                        body = {
+                            "model": model_name,
+                            "messages": [{"role": "user", "content": "ping"}],
+                            "max_tokens": 5,
+                            "temperature": 0,
+                        }
+                        resp = requests.post(
+                            "https://api.openai.com/v1/chat/completions",
+                            headers=headers,
+                            json=body,
+                            timeout=12,
+                            proxies=proxies,
+                        )
+                        if resp.status_code == 200:
+                            # Apply immediately for current process
+                            os.environ['OPENAI_MODEL'] = model_name
+                            return f"✓ OpenAI API 有效（模型: {model_name}）"
+                        if resp.status_code == 401:
+                            return "✗ OpenAI returned HTTP 401: Invalid API key"
+                        return f"✗ OpenAI chat test failed (HTTP {resp.status_code}): {resp.text[:120]}"
+                    
+                    elif api_name == "gemini":
+                        # Test using the same SDK that will be used for actual requests
+                        try:
+                            from google import genai
+                            client = genai.Client(api_key=api_key) if api_key else genai.Client()
+                            # Try a simple generation request similar to what we'll do
+                            resp = client.models.generate_content(
+                                model="gemini-2.0-flash",
+                                contents="Test ping",
+                                max_output_tokens=10,
+                            )
+                            # Check if we got a response
+                            if hasattr(resp, 'text') and resp.text:
+                                return "✓ Gemini API 有效"
+                            elif hasattr(resp, 'output') and resp.output:
+                                return "✓ Gemini API 有效"
+                            else:
+                                return "✓ Gemini API 有效"
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "API_KEY_INVALID" in error_msg or "invalid" in error_msg.lower():
+                                return "✗ Gemini API key 无效"
+                            elif "PERMISSION_DENIED" in error_msg:
+                                return "✗ Gemini API 权限不足"
+                            else:
+                                return f"✗ Gemini 测试失败: {error_msg[:100]}"
+                    
+                    elif api_name == "claude":
+                        headers = {
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json"
+                        }
+                        resp = requests.get(
+                            "https://api.anthropic.com/v1/models",
+                            headers=headers,
+                            timeout=8,
+                            proxies=proxies,
+                        )
+                        if resp.status_code == 200:
+                            return "✓ Claude API 有效"
+                        elif resp.status_code == 401:
+                            return "✗ Claude API key invalid"
+                        else:
+                            return f"✗ Claude test failed (HTTP {resp.status_code})"
+                    
+                    elif api_name == "deepseek":
+                        headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        }
+                        # Test with chat completions endpoint like OpenAI
+                        body = {
+                            "model": "deepseek-chat",
+                            "messages": [{"role": "user", "content": "ping"}],
+                            "max_tokens": 5,
+                        }
+                        resp = requests.post(
+                            "https://api.deepseek.com/v1/chat/completions",
+                            headers=headers,
+                            json=body,
+                            timeout=8,
+                            proxies=proxies,
+                        )
+                        if resp.status_code == 200:
+                            return "✓ Deepseek API 有效"
+                        elif resp.status_code == 401:
+                            return "✗ Deepseek API key invalid"
+                        else:
+                            return f"✗ Deepseek test failed (HTTP {resp.status_code})"
+                    
+                except Exception as e:
+                    return f"✗ Connection error: {str(e)[:60]}"
+            
+            # Create API input sections
+            api_configs = {
+                "gemini": "Gemini API Key",
+                "openai": "OpenAI API Key",
+                "claude": "Claude API Key",
+                "deepseek": "Deepseek API Key",
+            }
+            
+            api_inputs = {}
+            api_status_labels = {}
+            
+            for api_name, api_label in api_configs.items():
+                with ui.row().classes("gap-3 items-end mb-4"):
+                    # API Key input
+                    api_input = glass_input(
+                        api_label,
+                        placeholder=f"{api_label}...",
+                        value=app_state["api_keys"].get(api_name, "")
+                    )
+                    api_input.props("type=password")
+                    api_inputs[api_name] = api_input
+
+                    async def paste_from_clipboard(inp=api_input):
+                        try:
+                            text = await ui.run_javascript("navigator.clipboard.readText()", timeout=5.0)
+                            if text:
+                                inp.set_value(text)
+                                ui.notify("✓ 已从剪贴板粘贴", type="positive")
+                            else:
+                                ui.notify("剪贴板为空或无法读取", type="warning")
+                        except Exception as e:
+                            ui.notify("无法读取剪贴板，请允许权限或用 Cmd+V 粘贴", type="negative")
+                    api_input.on("contextmenu", paste_from_clipboard)
+                    
+                    # Test button
+                    status_label = ui.label("").classes(f"{GLASS_THEME['text_secondary']} text-sm")
+                    api_status_labels[api_name] = status_label
+                    
+                    def create_test_handler(name, inp, label):
+                        async def test_handler():
+                            label.set_text("⏳ Testing...")
+                            label.classes(remove="text-red-600 text-emerald-600", add=f"{GLASS_THEME['text_secondary']}")
+                            key_val = inp.value.strip() if inp.value else ""
+                            result = await asyncio.to_thread(test_api, name, key_val)
+                            label.set_text(result)
+                            if "✓" in result:
+                                label.classes(remove=f"{GLASS_THEME['text_secondary']} text-red-600", add="text-emerald-600")
+                                api_test_results[name] = True
+                                last_ok_provider["name"] = name
+
+                                # Apply immediately - always use the API that was just tested successfully
+                                if key_val:
+                                    app_state["api_keys"][name] = key_val
+                                    app_state["current_api"] = name  # Always switch to tested API
+                                    app_state["last_tested_ok_api"] = name  # Track last successful test
+                                    current_api_display.set_text(f"当前 API: {name.upper()}")
+                                    print(f"[API Config] Switched to {name.upper()} after successful test")
+                            else:
+                                label.classes(remove=f"{GLASS_THEME['text_secondary']} text-emerald-600", add="text-red-600")
+                                api_test_results[name] = False
+                        return test_handler
+                    
+                    glass_button("测试", create_test_handler(api_name, api_input, status_label))
+            
+            # Save to .env option (persist on save)
+            with ui.row().classes("gap-2 mt-4 items-center"):
+                save_to_env_checkbox = ui.checkbox("保存到 .env 文件（仅开发机，谨慎）")
+
+            # Save configuration
+            def save_api_config():
+                # Save all API keys
+                for api_name, inp in api_inputs.items():
+                    app_state["api_keys"][api_name] = inp.value.strip() if inp.value else None
+                
+                # Determine priority order based on valid APIs (preserve configured priority)
+                valid_apis = [name for name in app_state.get("api_priority_order", []) if app_state["api_keys"].get(name)]
+
+                # If the user just tested a provider successfully, prefer it as current.
+                preferred = last_ok_provider.get("name")
+                if preferred and preferred in valid_apis:
+                    app_state["current_api"] = preferred
+                    # Keep failover order but move the preferred provider to the front.
+                    valid_apis = [preferred] + [x for x in valid_apis if x != preferred]
+                elif valid_apis:
+                    app_state["current_api"] = valid_apis[0]
+                else:
+                    app_state["current_api"] = None
+
+                app_state["api_priority_order"] = valid_apis
+
+                if valid_apis:
+                    current_api_display.set_text(f"当前 API: {app_state['current_api'].upper()}")
+                    ui.notify("✓ API 配置已保存！当前使用: " + app_state["current_api"].upper(), type="positive")
+
+                    # Apply OpenAI model selection immediately
+                    try:
+                        model_name = (openai_model_input.value or '').strip()
+                        if model_name:
+                            os.environ['OPENAI_MODEL'] = model_name
+                    except Exception:
+                        pass
+
+                    # Auto-navigate back to dashboard after successful configuration
+                    ui.timer(2.0, lambda: ui.navigate.to("/"), once=True)
+
+                    # Persist to .env if requested
+                    if save_to_env_checkbox.value:
+                        try:
+                            env_lines = []
+                            for api_name in api_configs.keys():
+                                key_val = app_state["api_keys"].get(api_name)
+                                if key_val:
+                                    env_lines.append(f"{api_name.upper()}_API_KEY={key_val}")
+
+                            # Persist OpenAI model (optional)
+                            model_name = (openai_model_input.value or '').strip()
+                            if model_name:
+                                env_lines.append(f"OPENAI_MODEL={model_name}")
+
+                            env_lines.append(f"SELECTED_API_PROVIDER={app_state['current_api']}")
+                            env_lines.append(f"SELECTED_API_KEY={app_state['api_keys'].get(app_state['current_api'], '')}")
+                            with open(os.path.join(os.path.dirname(__file__), '.env'), 'w', encoding='utf-8') as f:
+                                f.write("\n".join(env_lines) + "\n")
+                            ui.notify("✓ 配置已保存至 .env", type="positive")
+                        except Exception as e:
+                            ui.notify(f"✗ 保存至 .env 失败: {str(e)}", type="negative")
+                else:
+                    app_state["current_api"] = None
+                    ui.notify("⚠️ 请至少配置一个有效的 API", type="warning")
+            
+            with ui.row().classes("gap-3 mt-6"):
+                glass_button("确认并使用所选", save_api_config)
+                glass_button(
+                    "使用 MOCK AI",
+                    lambda: (
+                        app_state.update({"current_api": "mock"}),
+                        current_api_display.set_text("当前 API: MOCK"),
+                        ui.notify("✓ 已切换至 MOCK AI", type="positive")
+                    ),
+                    variant="secondary"
+                )
+            
+            # Tip: testing only validates connectivity; click "确认并使用所选" to apply.
+        
+        # API Failover Information
+        with glass_card("ℹ️ API 自动故障转移"):
+            ui.label("当前配置的 API 将按以下优先级使用：").classes(f"{GLASS_THEME['text_primary']} font-semibold mb-3")
+            
+            with ui.column().classes("ml-4 gap-1"):
+                priority_num = 1
+                for api in app_state["api_priority_order"]:
+                    if app_state["api_keys"].get(api):
+                        ui.label(f"{priority_num}. {api.upper()} (已配置)").classes(f"{GLASS_THEME['text_primary']}")
+                        priority_num += 1
+                if priority_num == 1:
+                    ui.label("暂无配置的 API").classes(f"{GLASS_THEME['text_secondary']}")
+            
+            ui.label("如果当前 API 发生错误，系统会自动切换到下一个可用的 API，并在界面顶部显示错误提示。").classes(f"{GLASS_THEME['text_secondary']} text-sm mt-3")
 
 
 # ============================================================
@@ -537,12 +858,33 @@ app.on_shutdown(lambda: asyncio.create_task(close_db()))
 # ============================================================
 
 if __name__ in {"__main__", "__mp_main__"}:
+    def find_available_port(preferred: int = 9091, span: int = 10) -> int:
+        """Find an available port starting from preferred, cycling within range.
+
+        Args:
+            preferred: Starting port to try.
+            span: Number of ports to try consecutively.
+        """
+        for offset in range(span):
+            candidate = preferred + offset
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("0.0.0.0", candidate))
+                    return candidate
+                except OSError:
+                    continue
+        # If none free, fall back to preferred
+        return preferred
+
+    chosen_port = find_available_port(9091, span=10)
+    if chosen_port != 9091:
+        print(f"[APP] Port 9091 busy, switched to {chosen_port}")
     print("[APP] Starting SmartMold Pilot V3...")
-    print("[APP] Open browser at: http://localhost:9091")
+    print(f"[APP] Open browser at: http://localhost:{chosen_port}")
     ui.run(
         title="SmartMold Pilot V3",
         dark=False,
-        port=9091,
+        port=chosen_port,
         show=True,
     )
     

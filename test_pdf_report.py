@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from seed_data import ScientificMoldingSeedData
-from pdf_generator_v2 import generate_mil_report_v2
+from pdf_generator_v2 import generate_brand1_report_v2
 
 # 使用 seed_data 生成物理真实数据
 seed_gen = ScientificMoldingSeedData(seed=42)
@@ -86,22 +86,22 @@ pdf_data = {
 }
 
 # 生成PDF报告
-print("正在生成完整的MIL科学注塑验证报告...")
-output_path = "MIL_Report_Complete_Test.pdf"
-generate_mil_report_v2(pdf_data, output_path)
+print("正在生成完整的Brand1科学注塑验证报告...")
+output_path = "Brand1_Report_Complete_Test.pdf"
+generate_brand1_report_v2(pdf_data, output_path)
 file_size = os.path.getsize(output_path)
 
-print(f"\n✓ PDF报告生成成功!")
+print(f"\n[OK] PDF报告生成成功!")
 print(f"  文件路径: {output_path}")
 print(f"  文件大小: {file_size:,} 字节 ({file_size/1024:.1f} KB)")
 print(f"\n报告包含以下内容:")
-print(f"  ✓ 产品、模具、材料、机台信息")
-print(f"  ✓ Step 1: 粘度曲线测试 ({len(suite['step1_viscosity'])} 个数据点)")
-print(f"  ✓ Step 2: 型腔平衡测试 (短射+满射)")
-print(f"  ✓ Step 3: 压力降测试 ({len(suite['step3_pressure_drop'])} 个测量点)")
-print(f"  ✓ Step 4: 工艺窗口 ({len(suite['step4_process_window'])} 组参数)")
-print(f"  ✓ Step 5: 浇口冻结 ({len(suite['step5_gate_freeze'])} 个时间点)")
-print(f"  ✓ Step 6: 冷却时间 ({len(suite['step6_cooling_time'])} 次测试)")
-print(f"  ✓ Step 7: 锁模力优化 ({len(suite['step7_clamping_force'])} 个测试点)")
+print(f"  [OK] 产品、模具、材料、机台信息")
+print(f"  [OK] Step 1: 粘度曲线测试 ({len(suite['step1_viscosity'])} 个数据点)")
+print(f"  [OK] Step 2: 型腔平衡测试 (短射+满射)")
+print(f"  [OK] Step 3: 压力降测试 ({len(suite['step3_pressure_drop'])} 个测量点)")
+print(f"  [OK] Step 4: 工艺窗口 ({len(suite['step4_process_window'])} 组参数)")
+print(f"  [OK] Step 5: 浇口冻结 ({len(suite['step5_gate_freeze'])} 个时间点)")
+print(f"  [OK] Step 6: 冷却时间 ({len(suite['step6_cooling_time'])} 次测试)")
+print(f"  [OK] Step 7: 锁模力优化 ({len(suite['step7_clamping_force'])} 个测试点)")
 print(f"\n使用以下命令查看PDF:")
 print(f"  open {output_path}")

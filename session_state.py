@@ -201,6 +201,35 @@ class SevenStepSessionState:
         
         # Step skipped status
         self.step_skipped: Dict[int, bool] = {}
+
+        # Realtime AI assessments captured during the workflow (do not call AI during PDF generation)
+        # step index: 0..7
+        self.ai_assessments: Dict[int, Dict[str, Any]] = {}
+
+    def set_ai_assessment(self, step: int, assessment: Dict[str, Any], provider: Optional[str] = None):
+        """Store realtime AI assessment for a step.
+
+        step: 0..7
+        assessment: provider response dict (best-effort JSON)
+        provider: 'openai'/'gemini'/etc.
+        """
+        if assessment is None:
+            return
+        try:
+            step_int = int(step)
+        except Exception:
+            return
+        if step_int < 0 or step_int > 7:
+            return
+        self.ai_assessments[step_int] = {
+            'provider': provider,
+            'timestamp': datetime.now().isoformat(),
+            'assessment': assessment,
+        }
+
+    def get_ai_assessments(self) -> Dict[int, Dict[str, Any]]:
+        """Get all stored realtime AI assessments."""
+        return self.ai_assessments
     
     def set_step_remark(self, step: int, reason: str, remark: str, data_issue: str):
         """Store remark for a step with unreasonable data."""
@@ -242,11 +271,11 @@ class SevenStepSessionState:
     
     def set_step2_result(self, balance_ratio: float, cavity_weights: Dict[int, float], cavity_weights_full: Optional[Dict[int, float]] = None, visual_checks: Optional[Dict[int, str]] = None):
         """Set Step 2 results."""
-        self.step_completed[2] = True
         self.cavity_balance_ratio = balance_ratio
         self.cavity_weights = cavity_weights
         self.cavity_weights_full = cavity_weights_full
         self.cavity_visual_checks = visual_checks or {k: "OK" for k in cavity_weights.keys()}
+        print(f"[SessionState] Step 2 completed: cavity_balance_ratio = {balance_ratio}")
     
     def set_step3_result(self, margin: float, is_limited: bool, detailed_data: Optional[Dict[str, Any]] = None):
         """Store Step 3 (Pressure Drop) results."""
@@ -375,6 +404,7 @@ class SevenStepSessionState:
     def get_progress_summary(self) -> Dict[str, Any]:
         """Get current workflow progress."""
         return {
+            "step0_completed": self.machine_snapshot is not None,
             "current_step": self.current_step,
             "step1_completed": self.optimal_injection_speed is not None,
             "step2_completed": self.cavity_balance_ratio is not None,

@@ -86,7 +86,7 @@ class ClampingForceData:
 
 @dataclass
 class MachineSnapshotData:
-    """项目综合信息 - 扩充版（对应MIL标准）"""
+    """项目综合信息 - 扩充版（对应Brand1标准）"""
     # 产品信息
     model_no: str = ""
     part_no: str = ""
@@ -694,7 +694,7 @@ def create_template_excel(output_path: str) -> str:
         ws7[f'C{i}'] = point['flash_detected']
         ws7[f'B{i}'] = point['flash_detected']
     
-    # 项目综合信息 - MIL标准格式（扩充版）
+    # 项目综合信息 - Brand1标准格式（扩充版）
     ws_project = wb.create_sheet("项目综合信息")
     ws_project['A1'] = "参数分类"
     ws_project['B1'] = "参数名称"

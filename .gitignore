@@ -56,10 +56,14 @@ smartmold.db-wal
 # Generated Reports
 static/*.pdf
 static/*.html
-MIL_Report_*.pdf
-TTI_Report_*.pdf
+Brand1_Report_*.pdf
+品牌方一_Report_*.pdf
 debug_report_*.pdf
 test_*.pdf
 
 # Excel Temp Files
 ~$*.xlsx
+
+# Local fonts (large binaries; keep fonts/README.md tracked)
+fonts/*.otf
+fonts/*.ttf

@@ -2,7 +2,7 @@
 
 ## 📋 更新摘要（2026-01-07）
 
-本次更新按照 **MIL Scientific Injection Molding Standard** 完善了数据模板，新增关键元数据和辅助指标。
+本次更新按照 **Brand1 Scientific Injection Molding Standard** 完善了数据模板，新增关键元数据和辅助指标。
 
 ---
 
@@ -143,7 +143,7 @@
 
 ## 🎯 关键改进
 
-### 1. 符合MIL标准
+### 1. 符合Brand1标准
 - ✅ 报告头部信息完整（产品、模具、材料、机台）
 - ✅ 数据可追溯性（供应商、负责人、日期）
 - ✅ 工艺参数可复现（周期时间、烘烤条件）
@@ -165,7 +165,7 @@
 | 文件名 | 大小 | 说明 |
 |--------|------|------|
 | SmartMold_数据模板_v4.xlsx | ~25 KB | 完整数据输入模板 |
-| MIL_Report_Complete_Test.pdf | 111.7 KB | 示例验证报告（8页） |
+| Brand1_Report_Complete_Test.pdf | 111.7 KB | 示例验证报告（8页） |
 
 ---
 
@@ -188,7 +188,7 @@
 - ✅ Excel模板生成成功：9个工作表，139行数据
 - ✅ PDF报告生成成功：8页，包含所有新字段
 - ✅ 数据一致性：seed_data.py → Excel → PDF 全流程验证
-- ✅ MIL标准对齐：报告头部完整，数据可追溯
+- ✅ Brand1标准对齐：报告头部完整，数据可追溯
 
 ---
 
@@ -200,7 +200,7 @@
 3. 按顺序填写 Step 1-7 测试数据
 4. 在 SmartMold 应用中点击"上传Excel"
 5. 系统自动计算派生指标（粘度、剪切率等）
-6. 生成专业MIL验证报告（PDF）
+6. 生成专业Brand1验证报告（PDF）
 
 ### 关键注意事项
 - **切换位置**：每次测试应保持一致
@@ -212,4 +212,4 @@
 
 生成时间: 2026-01-07
 版本: V4.0
-标准: MIL Scientific Injection Molding Standard
+标准: Brand1 Scientific Injection Molding Standard

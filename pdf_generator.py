@@ -1,6 +1,6 @@
 """
-PDF Report Generator - MIL Scientific Injection Molding Validation
-按照 TTI Excel 模板格式生成专业的科学注塑验证报告
+PDF Report Generator - Brand1 Scientific Injection Molding Validation
+按照 品牌方一 Excel 模板格式生成专业的科学注塑验证报告
 
 作者: SmartMold Pilot V3
 版本: 2.0 (7步法完整版)
@@ -13,8 +13,8 @@ from typing import Dict, Any, Optional, List
 import os
 
 
-class MILReportPDF(FPDF):
-    """MIL 科学注塑验证报告 PDF 生成器"""
+class Brand1ReportPDF(FPDF):
+    """Brand1 科学注塑验证报告 PDF 生成器"""
     
     def __init__(self):
         super().__init__()
@@ -24,14 +24,14 @@ class MILReportPDF(FPDF):
         self.page_title = ""
         
     def header(self):
-        """页眉 - TTI Logo"""
-        # TTI Logo 蓝色背景
+        """页眉 - 品牌方一 Logo"""
+        # 品牌方一 Logo 蓝色背景
         self.set_fill_color(0, 51, 102)
         self.rect(10, 8, 30, 12, 'F')
         self.set_text_color(255, 255, 255)
         self.set_font('CN', '', 10)
         self.set_xy(12, 11)
-        self.cell(26, 6, 'TTi', align='C')
+        self.cell(26, 6, '品牌方一', align='C')
         
         # 报告标题
         if self.page_title:
@@ -44,7 +44,7 @@ class MILReportPDF(FPDF):
         self.set_text_color(100, 100, 100)
         self.set_font('CN', '', 8)
         self.set_xy(150, 10)
-        self.cell(0, 4, f"Report No: TTI-SM-{datetime.now().strftime('%Y%m%d')}", align='R')
+        self.cell(0, 4, f"Report No: 品牌方一-SM-{datetime.now().strftime('%Y%m%d')}", align='R')
         self.set_xy(150, 15)
         self.cell(0, 4, datetime.now().strftime("%Y-%m-%d"), align='R')
         
@@ -55,7 +55,7 @@ class MILReportPDF(FPDF):
         self.set_y(-12)
         self.set_font('CN', '', 7)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 8, f'SmartMold Pilot V3.0 | MIL Scientific Injection Molding | Page {self.page_no()}', align='C')
+        self.cell(0, 8, f'SmartMold Pilot V3.0 | Brand1 Scientific Injection Molding | Page {self.page_no()}', align='C')
 
     # ==================== 辅助方法 ====================
     
@@ -167,9 +167,9 @@ class MILReportPDF(FPDF):
         self.ln(2)
 
 
-def generate_mil_report(session_data: Dict[str, Any], output_path: str = None) -> str:
+def generate_brand1_report(session_data: Dict[str, Any], output_path: str = None) -> str:
     """
-    生成完整的 MIL 科学注塑验证报告 PDF
+    生成完整的 Brand1 科学注塑验证报告 PDF
     
     Args:
         session_data: 包含所有试验数据的字典
@@ -182,14 +182,14 @@ def generate_mil_report(session_data: Dict[str, Any], output_path: str = None) -
     if output_path is None:
         static_dir = Path(__file__).parent / 'static'
         static_dir.mkdir(exist_ok=True)
-        output_path = static_dir / f"TTI_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = static_dir / f"Brand1_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     
-    pdf = MILReportPDF()
+    pdf = Brand1ReportPDF()
     remarks = session_data.get('step_remarks', {})
     
     # ==================== 第1页: 总结页 ====================
     pdf.add_page()
-    pdf.page_title = "MIL Scientific Injection Molding Validation"
+    pdf.page_title = "Brand1 Scientific Injection Molding Validation"
     
     # 产品信息
     pdf.section_title("产品信息", "Part Information")
@@ -552,7 +552,7 @@ def generate_mil_report(session_data: Dict[str, Any], output_path: str = None) -
     
     # ==================== 第10页: 机台参数卡 ====================
     pdf.add_page()
-    pdf.page_title = "MIL INJECTION MOLD TRIAL SHOT RECORD 试模参数记录表"
+    pdf.page_title = "Brand1 INJECTION MOLD TRIAL SHOT RECORD 试模参数记录表"
     
     # M/C Set Up
     pdf.section_title("M/C Set Up 机台设置")
@@ -762,16 +762,16 @@ def generate_report_from_session(session) -> str:
         },
     }
     
-    return generate_mil_report(session_data)
+    return generate_brand1_report(session_data)
 
 
 # 保持向后兼容
 def generate_tti_report(session_data: dict, output_path: str = None) -> str:
-    return generate_mil_report(session_data, output_path)
+    return generate_brand1_report(session_data, output_path)
 
 
 def generate_detailed_report(session_data: dict, output_path: str = None) -> str:
-    return generate_mil_report(session_data, output_path)
+    return generate_brand1_report(session_data, output_path)
 
 
 if __name__ == '__main__':
@@ -921,5 +921,5 @@ if __name__ == '__main__':
         },
     }
     
-    path = generate_mil_report(test_data, 'test_mil_report.pdf')
+    path = generate_brand1_report(test_data, 'test_Brand1_report.pdf')
     print(f"PDF generated: {path}")

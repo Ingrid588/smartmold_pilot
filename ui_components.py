@@ -132,8 +132,8 @@ def glass_input(
     """
     inp = ui.input(label=label, placeholder=placeholder, value=value)
     inp.classes(GLASS_INPUT_STYLE)
-    inp.props('outlined dense')
-    inp.style('line-height: 1.5; min-height: 56px; max-height: 56px; overflow: hidden;')
+    inp.props('outlined')
+    inp.style('min-height: 56px;')
     
     if on_change:
         inp.on_change(on_change)
@@ -149,8 +149,8 @@ def glass_number(
     """Create a frosted glass number input."""
     num = ui.number(label=label, value=value)
     num.classes(GLASS_INPUT_STYLE)
-    num.props('outlined dense')
-    num.style('line-height: 1.5; max-height: 56px; overflow: hidden;')
+    num.props('outlined')
+    num.style('min-height: 56px;')
     
     if on_change:
         num.on_change(on_change)
@@ -170,7 +170,7 @@ def glass_select(
     
     select = ui.select(label=label, options=options, value=value)
     select.classes(GLASS_INPUT_STYLE)
-    select.props('outlined dense')
+    select.props('outlined')
     
     if on_change:
         select.on_change(on_change)

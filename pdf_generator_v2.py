@@ -1,5 +1,5 @@
 """
-PDF Report Generator V2 - 完全复刻 MIL Excel 模板
+PDF Report Generator V2 - 完全复刻 Brand1 Excel 模板
 严格按照"模版案例 Scientific Injection Molding Validation NEW 7.1(2).xlsx"布局生成PDF
 
 核心原则: 
@@ -12,23 +12,43 @@ from fpdf import FPDF
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 import os
+import logging
+from pathlib import Path
 
 
-class MILReportV2(FPDF):
-    """MIL 科学注塑验证报告 V2 - Excel模板复刻版"""
+class Brand1ReportV2(FPDF):
+    """Brand1 科学注塑验证报告 V2 - Excel模板复刻版"""
     
     def __init__(self):
         super().__init__(orientation='P', unit='mm', format='A4')
         self.set_auto_page_break(auto=True, margin=15)
-        # 中文字体
-        self.add_font('CN', '', '/System/Library/Fonts/STHeiti Medium.ttc')
-        self.add_font('CN', 'B', '/System/Library/Fonts/STHeiti Medium.ttc')
+
+        # Reduce noisy fontTools logs (e.g., "feat NOT subset" / "morx NOT subset").
+        # This does not affect PDF output; it just keeps stdout clean.
+        try:
+            logging.getLogger('fontTools').setLevel(logging.ERROR)
+            logging.getLogger('fpdf').setLevel(logging.ERROR)
+        except Exception:
+            pass
+
+        # 中文字体：优先使用项目内置（下载到 ./fonts），否则回退到 macOS 系统字体。
+        base_dir = Path(__file__).resolve().parent
+        local_regular = base_dir / 'fonts' / 'NotoSansSC-Regular.otf'
+        local_bold = base_dir / 'fonts' / 'NotoSansSC-Bold.otf'
+
+        if local_regular.exists() and local_bold.exists():
+            self.add_font('CN', '', str(local_regular))
+            self.add_font('CN', 'B', str(local_bold))
+        else:
+            # Fallback for macOS machines without local fonts installed
+            self.add_font('CN', '', '/System/Library/Fonts/STHeiti Medium.ttc')
+            self.add_font('CN', 'B', '/System/Library/Fonts/STHeiti Medium.ttc')
         
     def header(self):
         """页眉"""
         self.set_font('CN', 'B', 14)
         self.set_text_color(0, 51, 102)
-        self.cell(0, 10, 'MIL Scientific Injection Molding Validation', align='C', new_x='LMARGIN', new_y='NEXT')
+        self.cell(0, 10, 'Brand1 Scientific Injection Molding Validation', align='C', new_x='LMARGIN', new_y='NEXT')
         self.ln(2)
         
     def footer(self):
@@ -37,6 +57,149 @@ class MILReportV2(FPDF):
         self.set_font('CN', '', 8)
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f'Page {self.page_no()}', align='C')
+
+    def add_assessment_page(self, assessment: Dict[str, Any]):
+        """Add a machine & mold assessment summary page based on computed assessment dict."""
+        self.add_page()
+        self.set_font('CN', 'B', 16)
+        self.set_text_color(0, 51, 102)
+        self.cell(0, 12, '机台与模具评估总结 (Machine & Mold Assessment)', new_x='LMARGIN', new_y='NEXT')
+        self.ln(4)
+
+        # Overall conclusion
+        self.set_font('CN', 'B', 12)
+        self.set_text_color(0, 0, 0)
+        self.cell(0, 8, f"总体结论：{assessment.get('overall', 'N/A')}", new_x='LMARGIN', new_y='NEXT')
+        self.ln(6)
+
+        # Metrics table
+        self.set_font('CN', '', 10)
+        self._subsection_title('关键指标 (Key Metrics)')
+        metrics = assessment.get('metrics', {})
+        metric_rows = [
+            ('建议锁模力', metrics.get('lock_force', 'N/A')),
+            ('压力裕度 (MPa)', metrics.get('pressure_margin', 'N/A')),
+            ('型腔平衡比', metrics.get('cavity_balance_ratio', 'N/A')),
+            ('浇口冻结时间 (s)', metrics.get('gate_freeze_time', 'N/A')),
+            ('建议冷却时间 (s)', metrics.get('cooling_time', 'N/A')),
+            ('推荐注塑速度 (mm/s)', metrics.get('optimal_speed', 'N/A')),
+        ]
+        self._info_table(metric_rows, cols=2)
+        self.ln(4)
+
+        # Conclusions
+        self._subsection_title('工程结论 (Conclusions & Findings)')
+        self.set_font('CN', '', 10)
+        for c in assessment.get('conclusions', []):
+            avail_w = self.w - self.l_margin - self.r_margin
+            if avail_w <= 10:
+                # reset x to left margin
+                self.set_x(self.l_margin)
+                avail_w = self.w - self.l_margin - self.r_margin
+            self.multi_cell(avail_w, 6, f'• {c}')
+        self.ln(4)
+
+        # Actions
+        self._subsection_title('建议动作 (Recommended Actions)')
+        if assessment.get('actions'):
+            for a in assessment.get('actions'):
+                avail_w = self.w - self.l_margin - self.r_margin
+                if avail_w <= 10:
+                    self.set_x(self.l_margin)
+                    avail_w = self.w - self.l_margin - self.r_margin
+                self.multi_cell(avail_w, 6, f'• {a}')
+        else:
+            self.multi_cell(0, 6, '• 无需紧急修复，按计划保养并进入试生产。')
+        self.ln(4)
+
+        # Risks / Notes
+        self._subsection_title('风险提示与验收建议 (Risks & Acceptance)')
+        if assessment.get('risks'):
+            for r in assessment.get('risks'):
+                avail_w = self.w - self.l_margin - self.r_margin
+                if avail_w <= 10:
+                    self.set_x(self.l_margin)
+                    avail_w = self.w - self.l_margin - self.r_margin
+                self.multi_cell(avail_w, 6, f'• {r}')
+        else:
+            self.multi_cell(0, 6, '• 无明显风险提示。')
+        self.ln(4)
+
+        # Realtime AI notes captured during the workflow (no live calls here)
+        ai_comments = assessment.get('ai_comments') or []
+        if ai_comments:
+            self._subsection_title('实时AI点评摘录 (Realtime AI Notes)')
+            self.set_font('CN', '', 9)
+            avail_w = self.w - self.l_margin - self.r_margin
+            step_names = {
+                0: '准备阶段/机台参数',
+                1: '步骤1 粘度曲线',
+                2: '步骤2 型腔平衡',
+                3: '步骤3 压力降',
+                4: '步骤4 工艺窗口',
+                5: '步骤5 浇口冻结',
+                6: '步骤6 冷却时间',
+                7: '步骤7 锁模力',
+            }
+
+            for item in ai_comments:
+                try:
+                    step = int(item.get('step'))
+                except Exception:
+                    step = None
+                title = step_names.get(step, f'Step {step}')
+                provider = (item.get('provider') or 'N/A').upper()
+                ts = (item.get('timestamp') or '')[:19]
+
+                # multi_cell(0, ...) can fail if current X is near the right margin;
+                # always reset to left margin and use an explicit available width.
+                self.set_x(self.l_margin)
+                self.multi_cell(avail_w, 5, f'【{title}】Provider: {provider}  Time: {ts}')
+
+                overall = item.get('overall')
+                if overall:
+                    self.set_x(self.l_margin)
+                    self.multi_cell(avail_w, 5, f'  总体：{overall}')
+
+                missing_key_data = item.get('missing_key_data') or []
+                if isinstance(missing_key_data, list) and missing_key_data:
+                    # keep it short in PDF
+                    self.set_x(self.l_margin)
+                    self.multi_cell(avail_w, 5, '  缺失关键数据（建议补齐）：')
+                    for m in missing_key_data[:5]:
+                        if isinstance(m, dict):
+                            label = m.get('label') or m.get('field') or 'N/A'
+                            why = m.get('why')
+                            line = f'    • {label}'
+                            if why:
+                                line += f'（用途：{why}）'
+                        else:
+                            line = f'    • {m}'
+                        self.set_x(self.l_margin)
+                        self.multi_cell(avail_w, 5, line)
+
+                conclusions = item.get('conclusions') or []
+                actions = item.get('actions') or []
+                risks = item.get('risks') or []
+
+                # limit length to keep PDF readable
+                if isinstance(conclusions, list):
+                    conclusions = conclusions[:3]
+                if isinstance(actions, list):
+                    actions = actions[:3]
+                if isinstance(risks, list):
+                    risks = risks[:3]
+
+                for c in conclusions:
+                    self.set_x(self.l_margin)
+                    self.multi_cell(avail_w, 5, f'  • 结论：{c}')
+                for a in actions:
+                    self.set_x(self.l_margin)
+                    self.multi_cell(avail_w, 5, f'  • 动作：{a}')
+                for r in risks:
+                    self.set_x(self.l_margin)
+                    self.multi_cell(avail_w, 5, f'  • 风险：{r}')
+                self.ln(2)
     
     # ========================================================================
     # 第1页: 产品、模具、材料、机台信息（Header Info）
@@ -125,26 +288,31 @@ class MILReportV2(FPDF):
     # 第2页: 粘度曲线 Viscosity Curve
     # ========================================================================
     
-    def add_viscosity_page(self, data: Dict[str, Any]):
+    def add_viscosity_page(self, data: Dict[str, Any], status_data: Dict[str, Any] = None, header_data: Dict[str, Any] = None):
         """
         第2页: Step 1 粘度曲线 - 完整试验报告
-        
-        报告结构:
-        1. 试验目的
-        2. 试验方法
-        3. 原始测量数据表格（所有测试点）
-        4. 数据分析（计算剪切率、有效粘度）
-        5. 结果讨论（拐点识别、剪切变稀）
-        6. 工程结论（推荐射速范围）
-        7. 工程建议（下一步操作）
         """
         self.add_page()
+        if status_data:
+            self._status_box(1, status_data)
         
         # 标题
         self.set_font('CN', 'B', 16)
         self.set_text_color(0, 51, 102)
         self.cell(0, 12, 'Step 1: 粘度曲线测试 Viscosity Curve Study', new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
+
+        # 0. 背景设定 (Background Settings)
+        if header_data:
+            self._subsection_title("0. 工艺背景设定 (Process Background)")
+            bg_data = [
+                ("料筒区 (°C)", f"{header_data.get('barrel_temp_zone1', 'N/A')}/{header_data.get('barrel_temp_zone2', 'N/A')}/{header_data.get('barrel_temp_zone3', 'N/A')}/{header_data.get('barrel_temp_zone4', 'N/A')}/{header_data.get('barrel_temp_zone5', 'N/A')}"),
+                ("射嘴/热流道 (°C)", f"{header_data.get('nozzle_temp', 'N/A')} / {header_data.get('hot_runner_temp', 'N/A')}"),
+                ("模温 (定/动 °C)", f"{header_data.get('mold_temp_fixed', 'N/A')} / {header_data.get('mold_temp_moving', 'N/A')}"),
+                ("螺杆直径 (mm)", header_data.get('screw_diameter', 'N/A')),
+            ]
+            self._info_table(bg_data, cols=2)
+            self.ln(2)
         
         # 1. 试验目的
         self._subsection_title("1. 试验目的 (Objective)")
@@ -252,9 +420,9 @@ class MILReportV2(FPDF):
         self.set_font('CN', '', 9)
         
         # 计算趋势
-        visc_min = min(viscosities)
-        visc_max = max(viscosities)
-        reduction_pct = (visc_max - visc_min) / visc_max * 100
+        visc_min = min(viscosities) if viscosities else 0
+        visc_max = max(viscosities) if viscosities else 0
+        reduction_pct = (visc_max - visc_min) / visc_max * 100 if visc_max > 0 else 0
         
         discussion_text = (
             f"• 剪切变稀效应明显：粘度从{visc_max:.0f}降至{visc_min:.0f} Pa·s（降低{reduction_pct:.1f}%）\n"
@@ -324,7 +492,7 @@ class MILReportV2(FPDF):
         self._subsection_title("目的（PURPOSE）")
         self.set_font('CN', '', 9)
         self.set_text_color(0, 0, 0)
-        self.multi_cell(0, 5, "找到最佳射胶速度\nFind the optimal injection speed")
+        self.multi_cell(0, 5, "找到最佳射胶速度 / Find the optimal injection speed")
         self.ln(3)
         
         # 原始数据 + 计算结果表格
@@ -416,26 +584,30 @@ class MILReportV2(FPDF):
     # 第3页: 型腔平衡 Cavity Balance
     # ========================================================================
     
-    def add_cavity_balance_page(self, data: Dict[str, Any]):
+    def add_cavity_balance_page(self, data: Dict[str, Any], status_data: Dict[str, Any] = None, header_data: Dict[str, Any] = None):
         """
         第3页: Step 2 型腔平衡 - 完整试验报告
-        
-        报告结构:
-        1. 试验目的
-        2. 试验方法
-        3. 短射测试数据（50%填充）
-        4. 满射测试数据（99%填充）
-        5. 数据分析（平衡度计算）
-        6. 结果讨论（不平衡原因）
-        7. 工程结论（合格判定）
-        8. 工程建议（调整方案）
         """
         self.add_page()
+        if status_data:
+            self._status_box(2, status_data)
         
         self.set_font('CN', 'B', 16)
         self.set_text_color(0, 51, 102)
         self.cell(0, 12, 'Step 2: 型腔平衡测试 Cavity Balance Test', new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
+
+        # 0. 背景设定 (Background Settings)
+        if header_data:
+            self._subsection_title("0. 工艺背景设定 (Process Background)")
+            bg_data = [
+                ("填充速度 (mm/s)", "40-70 (推荐)"),
+                ("料筒区 (°C)", f"{header_data.get('barrel_temp_zone1', 'N/A')}/{header_data.get('barrel_temp_zone2', 'N/A')}/{header_data.get('barrel_temp_zone3', 'N/A')}/{header_data.get('barrel_temp_zone4', 'N/A')}/{header_data.get('barrel_temp_zone5', 'N/A')}"),
+                ("射嘴/热流道 (°C)", f"{header_data.get('nozzle_temp', 'N/A')} / {header_data.get('hot_runner_temp', 'N/A')}"),
+                ("模温 (定/动 °C)", f"{header_data.get('mold_temp_fixed', 'N/A')} / {header_data.get('mold_temp_moving', 'N/A')}"),
+            ]
+            self._info_table(bg_data, cols=2)
+            self.ln(2)
         
         # 1. 试验目的
         self._subsection_title("1. 试验目的 (Objective)")
@@ -486,10 +658,12 @@ class MILReportV2(FPDF):
         self._subsection_title("5. 数据分析 (Data Analysis)")
         
         # 分析两组数据
+        imbalance_short = 0
+        imbalance_full = 0
         if short_shot:
             values_short = list(short_shot.values())
-            avg_short = sum(values_short) / len(values_short)
-            imbalance_short = (max(values_short) - min(values_short)) / avg_short * 100
+            avg_short = sum(values_short) / len(values_short) if values_short else 0
+            imbalance_short = (max(values_short) - min(values_short)) / avg_short * 100 if avg_short > 0 else 0
             self.set_font('CN', '', 9)
             self.multi_cell(0, 5,
                 f"短射平衡度分析：\n"
@@ -497,13 +671,13 @@ class MILReportV2(FPDF):
                 f"  • 最大重量: {max(values_short):.3f} g （腔{list(short_shot.keys())[values_short.index(max(values_short))]}）\n"
                 f"  • 最小重量: {min(values_short):.3f} g （腔{list(short_shot.keys())[values_short.index(min(values_short))]}）\n"
                 f"  • 不平衡度: {imbalance_short:.2f}% （标准: <5%）\n"
-                f"  • 判定结果: {'✓ 合格' if imbalance_short < 5 else '✗ 不合格'}")
+                f"  • 判定结果: {'PASS 合格' if imbalance_short < 5 else 'FAIL 不合格'}")
             self.ln(2)
         
         if vp_switch:
             values_full = list(vp_switch.values())
-            avg_full = sum(values_full) / len(values_full)
-            imbalance_full = (max(values_full) - min(values_full)) / avg_full * 100
+            avg_full = sum(values_full) / len(values_full) if values_full else 0
+            imbalance_full = (max(values_full) - min(values_full)) / avg_full * 100 if avg_full > 0 else 0
             self.set_font('CN', '', 9)
             self.multi_cell(0, 5,
                 f"满射平衡度分析：\n"
@@ -511,7 +685,7 @@ class MILReportV2(FPDF):
                 f"  • 最大重量: {max(values_full):.3f} g （腔{list(vp_switch.keys())[values_full.index(max(values_full))]}）\n"
                 f"  • 最小重量: {min(values_full):.3f} g （腔{list(vp_switch.keys())[values_full.index(min(values_full))]}）\n"
                 f"  • 不平衡度: {imbalance_full:.2f}% （标准: <5%）\n"
-                f"  • 判定结果: {'✓ 合格' if imbalance_full < 5 else '✗ 不合格'}")
+                f"  • 判定结果: {'PASS 合格' if imbalance_full < 5 else 'FAIL 不合格'}")
         
         # 6. 结果讨论
         self.ln(5)
@@ -549,7 +723,7 @@ class MILReportV2(FPDF):
             overall_pass = overall_pass and (imbalance_full < 5)
         
         self.set_fill_color(200, 255, 200) if overall_pass else self.set_fill_color(255, 200, 200)
-        self.cell(0, 10, f"型腔平衡测试结果: {'✓ 合格 PASS' if overall_pass else '✗ 不合格 FAIL'}", 
+        self.cell(0, 10, f"型腔平衡测试结果: {'合格 PASS' if overall_pass else '不合格 FAIL'}", 
                  border=1, align='C', fill=True, new_x='LMARGIN', new_y='NEXT')
         
         # 8. 工程建议
@@ -582,7 +756,7 @@ class MILReportV2(FPDF):
         # 计算统计
         values = list(weights.values())
         cavities = list(weights.keys())
-        avg = sum(values) / len(values)
+        avg = sum(values) / len(values) if values else 0
         
         # 测量数据表格
         headers = ["型腔编号\nCavity #", "测量重量\nWeight (g)", "偏差率\nDeviation (%)", "目视判定\nVisual", "判定\nResult"]
@@ -597,7 +771,7 @@ class MILReportV2(FPDF):
         # 数据行
         for cav in sorted(weights.keys()):
             weight = weights[cav]
-            deviation_pct = (weight - avg) / avg * 100
+            deviation_pct = (weight - avg) / avg * 100 if avg > 0 else 0
             is_ok = abs(deviation_pct) <= 5
             vis_check = visual_checks.get(cav, "OK") if visual_checks else "OK"
             
@@ -610,10 +784,10 @@ class MILReportV2(FPDF):
             # 判定结果着色
             if is_ok and vis_check.upper() == "OK":
                 self.set_fill_color(200, 255, 200)  # 绿色
-                result_text = "✓"
+                result_text = "OK"
             else:
                 self.set_fill_color(255, 200, 200)  # 红色
-                result_text = "✗"
+                result_text = "NG"
             self.cell(col_widths[4], 6, result_text, border=1, align='C', fill=True)
             self.ln()
         
@@ -640,10 +814,10 @@ class MILReportV2(FPDF):
         
         # 计算统计
         values = list(weights.values())
-        avg = sum(values) / len(values)
-        max_val = max(values)
-        min_val = min(values)
-        imbalance = (max_val - min_val) / avg * 100
+        avg = sum(values) / len(values) if values else 0
+        max_val = max(values) if values else 0
+        min_val = min(values) if values else 0
+        imbalance = (max_val - min_val) / avg * 100 if avg > 0 else 0
         
         # 表格
         headers = ["腔号\nCavity", "重量(g)\nWeight", "偏差(%)\nDeviation"]
@@ -677,10 +851,10 @@ class MILReportV2(FPDF):
         # 判定
         if imbalance <= 5:
             self.set_text_color(0, 128, 0)
-            self.cell(0, 6, "✓ 合格 (Pass)", new_x='LMARGIN', new_y='NEXT')
+            self.cell(0, 6, "PASS 合格 (Pass)", new_x='LMARGIN', new_y='NEXT')
         else:
             self.set_text_color(255, 0, 0)
-            self.cell(0, 6, "✗ 不合格 (Fail) - 需要调整流道平衡", new_x='LMARGIN', new_y='NEXT')
+            self.cell(0, 6, "FAIL 不合格 (Fail) - 需要调整流道平衡", new_x='LMARGIN', new_y='NEXT')
         
         self.set_text_color(0, 0, 0)
         self.ln(5)
@@ -689,16 +863,30 @@ class MILReportV2(FPDF):
     # 第4页: 压力降 Pressure Drop
     # ========================================================================
     
-    def add_pressure_drop_page(self, data: Dict[str, Any]):
+    def add_pressure_drop_page(self, data: Dict[str, Any], status_data: Dict[str, Any] = None, header_data: Dict[str, Any] = None):
         """
         第4页: Step 3 压力降测试 - 完整试验报告
         """
         self.add_page()
+        if status_data:
+            self._status_box(3, status_data)
         
         self.set_font('CN', 'B', 16)
         self.set_text_color(0, 51, 102)
         self.cell(0, 12, 'Step 3: 动态压力降测试 Dynamic Pressure Drop Test', new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
+
+        # 0. 背景设定 (Background Settings)
+        if header_data:
+            self._subsection_title("0. 工艺背景设定 (Process Background)")
+            bg_data = [
+                ("填充时间 (s)", "0.5-2.0 (推荐)"),
+                ("料筒区 (°C)", f"{header_data.get('barrel_temp_zone1', 'N/A')}/{header_data.get('barrel_temp_zone2', 'N/A')}/{header_data.get('barrel_temp_zone3', 'N/A')}/{header_data.get('barrel_temp_zone4', 'N/A')}/{header_data.get('barrel_temp_zone5', 'N/A')}"),
+                ("射嘴/热流道 (°C)", f"{header_data.get('nozzle_temp', 'N/A')} / {header_data.get('hot_runner_temp', 'N/A')}"),
+                ("极大注射压力 (MPa)", header_data.get('max_injection_pressure', 'N/A')),
+            ]
+            self._info_table(bg_data, cols=2)
+            self.ln(2)
         
         # 1. 试验目的
         self._subsection_title("1. 试验目的 (Objective)")
@@ -815,10 +1003,10 @@ class MILReportV2(FPDF):
             total_drop = (pressures[0] - pressures[-1]) / pressures[0] * 100
             if total_drop < 50:
                 self.set_fill_color(200, 255, 200)
-                conclusion_text = f"✓ 压降测试合格 (总压降 {total_drop:.1f}% < 50%)"
+                conclusion_text = f"PASS 压降测试合格 (总压降 {total_drop:.1f}% < 50%)"
             else:
                 self.set_fill_color(255, 200, 200)
-                conclusion_text = f"✗ 压降测试不合格 (总压降 {total_drop:.1f}% > 50%)"
+                conclusion_text = f"FAIL 压降测试不合格 (总压降 {total_drop:.1f}% > 50%)"
             
             self.cell(0, 10, conclusion_text, border=1, align='C', fill=True, new_x='LMARGIN', new_y='NEXT')
         
@@ -852,16 +1040,30 @@ class MILReportV2(FPDF):
     # 第5页: 工艺窗口 Process Window
     # ========================================================================
     
-    def add_process_window_page(self, data: Dict[str, Any]):
+    def add_process_window_page(self, data: Dict[str, Any], status_data: Dict[str, Any] = None, header_data: Dict[str, Any] = None):
         """
         第5页: Step 4 工艺窗口 - 完整试验报告
         """
         self.add_page()
+        if status_data:
+            self._status_box(4, status_data)
         
         self.set_font('CN', 'B', 16)
         self.set_text_color(0, 51, 102)
         self.cell(0, 12, 'Step 4: 工艺窗口定义 Process Window Definition', new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
+
+        # 0. 背景设定 (Background Settings)
+        if header_data:
+            self._subsection_title("0. 工艺背景设定 (Process Background)")
+            bg_data = [
+                ("VP切换位置 (mm)", header_data.get('vp_transfer_position', 'N/A')),
+                ("成型周期 (s)", header_data.get('cycle_time', 'N/A')),
+                ("模温 (定/动 °C)", f"{header_data.get('mold_temp_fixed', 'N/A')} / {header_data.get('mold_temp_moving', 'N/A')}"),
+                ("极大注射压力 (MPa)", header_data.get('max_injection_pressure', 'N/A')),
+            ]
+            self._info_table(bg_data, cols=2)
+            self.ln(2)
         
         # 1. 试验目的
         self._subsection_title("1. 试验目的 (Objective)")
@@ -965,10 +1167,10 @@ class MILReportV2(FPDF):
         
         if pass_rate >= 30:
             self.set_fill_color(200, 255, 200)
-            conclusion_text = f"✓ 工艺窗口验证合格 (合格率{pass_rate:.1f}% > 30%)"
+            conclusion_text = f"PASS 工艺窗口验证合格 (合格率{pass_rate:.1f}% > 30%)"
         else:
             self.set_fill_color(255, 200, 200)
-            conclusion_text = f"✗ 工艺窗口验证不合格 (合格率{pass_rate:.1f}% 过低)"
+            conclusion_text = f"FAIL 工艺窗口验证不合格 (合格率{pass_rate:.1f}% 过低)"
             
         self.cell(0, 10, conclusion_text, border=1, align='C', fill=True, new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
@@ -980,8 +1182,8 @@ class MILReportV2(FPDF):
         pass_data = [(s, p) for s, p, q in zip(speeds, pressures, quality) if q == "Pass"]
         if pass_data:
             speeds_pass, pressures_pass = zip(*pass_data)
-            center_speed = sum(speeds_pass) / len(speeds_pass)
-            center_pressure = sum(pressures_pass) / len(pressures_pass)
+            center_speed = sum(speeds_pass) / len(speeds_pass) if speeds_pass else 0
+            center_pressure = sum(pressures_pass) / len(pressures_pass) if pressures_pass else 0
             
             recommendations = (
                 f"• 推荐量产设定中心点：\n"
@@ -999,16 +1201,30 @@ class MILReportV2(FPDF):
     # 第6页: 浇口冻结 Gate Freeze
     # ========================================================================
     
-    def add_gate_freeze_page(self, data: Dict[str, Any]):
+    def add_gate_freeze_page(self, data: Dict[str, Any], status_data: Dict[str, Any] = None, header_data: Dict[str, Any] = None):
         """
         第6页: Step 5 浇口冻结 - 完整试验报告
         """
         self.add_page()
+        if status_data:
+            self._status_box(5, status_data)
         
         self.set_font('CN', 'B', 16)
         self.set_text_color(0, 51, 102)
         self.cell(0, 12, 'Step 5: 浇口冻结研究 Gate Seal Study', new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
+
+        # 0. 背景设定 (Background Settings)
+        if header_data:
+            self._subsection_title("0. 工艺背景设定 (Process Background)")
+            bg_data = [
+                ("最大保压 (MPa)", header_data.get('max_holding_pressure', 'N/A')),
+                ("熔体温度 (°C)", header_data.get('recommended_melt_temp', 'N/A')),
+                ("模温 (定/动 °C)", f"{header_data.get('mold_temp_fixed', 'N/A')} / {header_data.get('mold_temp_moving', 'N/A')}"),
+                ("成型周期 (s)", header_data.get('cycle_time', 'N/A')),
+            ]
+            self._info_table(bg_data, cols=2)
+            self.ln(2)
         
         # 1. 试验目的
         self._subsection_title("1. 试验目的 (Objective)")
@@ -1090,7 +1306,11 @@ class MILReportV2(FPDF):
         else:
             discussion = "• 极高风险：由于浇口未冻结，熔体可能发生倒流，导致产品重量和尺寸波动极大。"
 
-        self.multi_cell(0, 5, discussion + "\n• 浇口冻结受模温、料温、浇口尺寸及保压压力的共同影响。")
+        avail_w = self.w - self.l_margin - self.r_margin
+        self.set_x(self.l_margin)
+        self.multi_cell(avail_w, 5, discussion)
+        self.set_x(self.l_margin)
+        self.multi_cell(avail_w, 5, "• 浇口冻结受模温、料温、浇口尺寸及保压压力的共同影响。")
         self.ln(3)
 
         # 6. 工程结论
@@ -1099,10 +1319,10 @@ class MILReportV2(FPDF):
         
         if freeze_time:
             self.set_fill_color(200, 255, 200)
-            conclusion_text = f"✓ 浇口冻结研究完成 (冻结时间 {freeze_time:.1f} s)"
+            conclusion_text = f"PASS 浇口冻结研究完成 (冻结时间 {freeze_time:.1f} s)"
         else:
             self.set_fill_color(255, 200, 200)
-            conclusion_text = "✗ 浇口冻结研究未完成 (未找到冻结点)"
+            conclusion_text = "FAIL 浇口冻结研究未完成 (未找到冻结点)"
             
         self.cell(0, 10, conclusion_text, border=1, align='C', fill=True, new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
@@ -1126,16 +1346,30 @@ class MILReportV2(FPDF):
     # 第7页: 冷却时间 Cooling Time
     # ========================================================================
     
-    def add_cooling_time_page(self, data: Dict[str, Any]):
+    def add_cooling_time_page(self, data: Dict[str, Any], status_data: Dict[str, Any] = None, header_data: Dict[str, Any] = None):
         """
         第7页: Step 6 冷却时间 - 完整试验报告
         """
         self.add_page()
+        if status_data:
+            self._status_box(6, status_data)
         
         self.set_font('CN', 'B', 16)
         self.set_text_color(0, 51, 102)
         self.cell(0, 12, 'Step 6: 冷却时间优化 Cooling Time Optimization', new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
+
+        # 0. 背景设定 (Background Settings)
+        if header_data:
+            self._subsection_title("0. 工艺背景设定 (Process Background)")
+            bg_data = [
+                ("最大保压 (MPa)", header_data.get('max_holding_pressure', 'N/A')),
+                ("模温 (定/动 °C)", f"{header_data.get('mold_temp_fixed', 'N/A')} / {header_data.get('mold_temp_moving', 'N/A')}"),
+                ("产品实测重量 (g)", header_data.get('part_actual_weight', 'N/A')),
+                ("成型周期 (s)", header_data.get('cycle_time', 'N/A')),
+            ]
+            self._info_table(bg_data, cols=2)
+            self.ln(2)
         
         # 1. 试验目的
         self._subsection_title("1. 试验目的 (Objective)")
@@ -1229,10 +1463,10 @@ class MILReportV2(FPDF):
         
         if optimal_time:
             self.set_fill_color(200, 255, 200)
-            conclusion_text = f"✓ 冷却方案通过验证 (推荐时间 {optimal_time:.0f} s)"
+            conclusion_text = f"PASS 冷却方案通过验证 (推荐时间 {optimal_time:.0f} s)"
         else:
             self.set_fill_color(255, 200, 200)
-            conclusion_text = "✗ 冷却方案未达标 (所有时间下变形量均超标)"
+            conclusion_text = "FAIL 冷却方案未达标 (所有时间下变形量均超标)"
             
         self.cell(0, 10, conclusion_text, border=1, align='C', fill=True, new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
@@ -1255,16 +1489,30 @@ class MILReportV2(FPDF):
     # 第8页: 锁模力 Clamping Force
     # ========================================================================
     
-    def add_clamping_force_page(self, data: Dict[str, Any]):
+    def add_clamping_force_page(self, data: Dict[str, Any], status_data: Dict[str, Any] = None, header_data: Dict[str, Any] = None):
         """
         第8页: Step 7 锁模力 - 完整试验报告
         """
         self.add_page()
+        if status_data:
+            self._status_box(7, status_data)
         
         self.set_font('CN', 'B', 16)
         self.set_text_color(0, 51, 102)
         self.cell(0, 12, 'Step 7: 锁模力优化 Clamping Force Optimization', new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
+
+        # 0. 背景设定 (Background Settings)
+        if header_data:
+            self._subsection_title("0. 工艺背景设定 (Process Background)")
+            bg_data = [
+                ("机台总吨位 (Tons)", header_data.get('machine_tonnage', 'N/A')),
+                ("最大保压 (MPa)", header_data.get('max_holding_pressure', 'N/A')),
+                ("模温 (定/动 °C)", f"{header_data.get('mold_temp_fixed', 'N/A')} / {header_data.get('mold_temp_moving', 'N/A')}"),
+                ("最大注射压 (MPa)", header_data.get('max_injection_pressure', 'N/A')),
+            ]
+            self._info_table(bg_data, cols=2)
+            self.ln(2)
         
         # 1. 试验目的
         self._subsection_title("1. 试验目的 (Objective)")
@@ -1356,10 +1604,10 @@ class MILReportV2(FPDF):
         
         if min_safe_force:
             self.set_fill_color(200, 255, 200)
-            conclusion_text = f"✓ 锁模力验证完成 (最小安全值 {min_safe_force:.0f} 吨)"
+            conclusion_text = f"PASS 锁模力验证完成 (最小安全值 {min_safe_force:.0f} 吨)"
         else:
             self.set_fill_color(255, 200, 200)
-            conclusion_text = "✗ 锁模力验证不合格 (未找到安全范围)"
+            conclusion_text = "FAIL 锁模力验证不合格 (未找到安全范围)"
             
         self.cell(0, 10, conclusion_text, border=1, align='C', fill=True, new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
@@ -1414,73 +1662,129 @@ class MILReportV2(FPDF):
             self.cell(col_width - label_width, 5, str(value), align='L')
         self.ln(6)
 
+    def _status_box(self, step_num: int, status_data: Dict[str, Any]):
+        """在页面顶部显示步骤状态（正常/偏离/跳过）"""
+        is_skipped = status_data.get('is_skipped', False)
+        is_unreasonable = status_data.get('is_unreasonable', False)
+        reason = status_data.get('reason', 'N/A')
+        remark = status_data.get('remark', 'N/A')
+        issue = status_data.get('issue', 'N/A')
+
+        if is_skipped:
+            self.set_fill_color(240, 240, 240) # 灰色
+            self.set_text_color(100, 100, 100)
+            title = f"⚠️ 步骤 {step_num}: 已跳过 (SKIPPED)"
+        elif is_unreasonable:
+            self.set_fill_color(255, 240, 230) # 橙色
+            self.set_text_color(200, 80, 0)
+            title = f"⚠️ 步骤 {step_num}: 存在偏离 (DEVIATED)"
+        else:
+            return 
+
+        self.set_font('CN', 'B', 10)
+        self.cell(0, 8, title, border='TLR', fill=True, ln=1)
+        
+        self.set_font('CN', '', 9)
+        self.set_text_color(0, 0, 0)
+        content = f"原因 (Reason): {reason}\n说明 (Notes): {remark}"
+        if is_unreasonable:
+            content += f"\n检测到的问题: {issue}"
+        
+        self.multi_cell(0, 6, content, border='BLR', fill=True)
+        self.ln(5)
+
 
 # ========================================================================
 # 主生成函数
 # ========================================================================
 
-def generate_mil_report_v2(data: Dict[str, Any], output_path: str) -> str:
+def generate_brand1_report_v2(data: Dict[str, Any], output_path: Optional[str] = None, session=None, external_assessment: Optional[Dict[str, Any]] = None) -> str:
+    """Generate Brand1 full validation report (V2) and write to `output_path`.
+    If `output_path` is None a timestamped file under `static/` will be used.
     """
-    生成 MIL 科学注塑验证报告 V2
-    
-    Args:
-        data: 完整的测试数据字典，包含：
-            - header: 头部信息（产品、模具、材料、机台）
-            - viscosity: 粘度曲线原始数据
-            - cavity_balance: 型腔平衡数据
-            - pressure_drop: 压力降数据
-            - process_window: 工艺窗口数据
-            - gate_freeze: 浇口冻结数据
-            - cooling_time: 冷却时间数据
-            - clamping_force: 锁模力数据
-        output_path: 输出PDF文件路径
-    
-    Returns:
-        生成的PDF文件路径
-    """
-    pdf = MILReportV2()
-    
+    if output_path is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_path = f"static/Brand1_Report_{timestamp}.pdf"
+
+    pdf = Brand1ReportV2()
+
+    # Debug aid: disable compression so PDF bytes contain readable text tokens.
+    # This is useful for smoke tests that assert sections are present.
+    # Enable with: PDF_DEBUG_NO_COMPRESS=1
+    try:
+        if str(os.getenv('PDF_DEBUG_NO_COMPRESS', '')).lower() in ('1', 'true', 'yes'):
+            if hasattr(pdf, 'set_compression'):
+                pdf.set_compression(False)
+    except Exception:
+        pass
+
+    # 获取共享信息
+    header_data = data.get('header', {})
+    statuses = data.get('step_statuses', {})
+
     # 第1页: 报告头（产品、模具、材料、机台信息）
-    pdf.add_header_page(data.get('header', {}))
-    
-    # 第2页: 粘度曲线
-    if 'viscosity' in data:
-        pdf.add_viscosity_page(data['viscosity'])
-    
-    # 第3页: 型腔平衡
-    if 'cavity_balance' in data:
-        pdf.add_cavity_balance_page(data['cavity_balance'])
-    
-    # 第4页: 压力降
-    if 'pressure_drop' in data:
-        pdf.add_pressure_drop_page(data['pressure_drop'])
-    
-    # 第5页: 工艺窗口
-    if 'process_window' in data:
-        pdf.add_process_window_page(data['process_window'])
-    
-    # 第6页: 浇口冻结
-    if 'gate_freeze' in data:
-        pdf.add_gate_freeze_page(data['gate_freeze'])
-    
-    # 第7页: 冷却时间
-    if 'cooling_time' in data:
-        pdf.add_cooling_time_page(data['cooling_time'])
-    
-    # 第8页: 锁模力
-    if 'clamping_force' in data:
-        pdf.add_clamping_force_page(data['clamping_force'])
-    
-    # 输出PDF
+    pdf.add_header_page(header_data)
+
+    # 第2-8页: 试验详细页面
+    pdf.add_viscosity_page(data.get('viscosity', {}), statuses.get(1), header_data)
+    pdf.add_cavity_balance_page(data.get('cavity_balance', {}), statuses.get(2), header_data)
+    pdf.add_pressure_drop_page(data.get('pressure_drop', {}), statuses.get(3), header_data)
+    pdf.add_process_window_page(data.get('process_window', {}), statuses.get(4), header_data)
+    pdf.add_gate_freeze_page(data.get('gate_freeze', {}), statuses.get(5), header_data)
+    pdf.add_cooling_time_page(data.get('cooling_time', {}), statuses.get(6), header_data)
+    pdf.add_clamping_force_page(data.get('clamping_force', {}), statuses.get(7), header_data)
+
+    # assessment page
+    if external_assessment:
+        assessment = external_assessment
+    else:
+        if session:
+            assessment = create_assessment_from_session(session)
+        else:
+            # best-effort: synthesize a small assessment from pdf data
+            assessment = _create_assessment_from_pdf_data(data)
+
+    pdf.add_assessment_page(assessment)
+
+    # 输出PDF并返回路径
+    os.makedirs('static', exist_ok=True)
     pdf.output(output_path)
     return output_path
 
 
-# ========================================================================
-# 从 Session 生成报告
+def _create_assessment_from_pdf_data(pdf_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Lightweight assessment synthesizer from prepared pdf_data dict.
+
+    This is used when we don't have a live session object or Gemini output.
+    """
+    metrics = {}
+    header = pdf_data.get('header', {})
+    metrics['machine_tonnage'] = header.get('machine_tonnage')
+    metrics['cavity_balance_ratio'] = None
+    try:
+        cb = pdf_data.get('cavity_balance', {})
+        ss = cb.get('short_shot_weights', {})
+        vp = cb.get('vp_switch_weights', {})
+        if ss and vp:
+            # crude: compute ratio of first two cavities when available
+            vals = list(ss.values())
+            if len(vals) >= 2 and vals[0] > 0:
+                metrics['cavity_balance_ratio'] = round(vals[1] / vals[0], 2)
+    except Exception:
+        pass
+
+    overall = '需进一步验证' if any([s.get('is_unreasonable') for s in pdf_data.get('step_statuses', {}).values()]) else '符合预期'
+
+    return {
+        'metrics': metrics,
+        'conclusions': ['基于运行数据的初步评估，建议按步骤执行试生产。'],
+        'actions': ['保持当前建议冷却时间并观察首批生产件。'],
+        'risks': [],
+        'overall': overall,
+    }
 # ========================================================================
 
-def generate_report_from_session(session) -> str:
+def generate_report_from_session(session, external_assessment: Optional[Dict[str, Any]] = None) -> str:
     """
     从 SevenStepSessionState 对象生成完整报告（V2版本）
     
@@ -1531,6 +1835,9 @@ def generate_report_from_session(session) -> str:
             'retention_time': getattr(snapshot, 'retention_time', 'N/A') if snapshot else 'N/A',
             'shot_percentage': getattr(snapshot, 'shot_percentage', 'N/A') if snapshot else 'N/A',
             'cycle_time': getattr(snapshot, 'cycle_time', 'N/A') if snapshot else 'N/A',
+            'max_injection_pressure': getattr(snapshot, 'max_injection_pressure', 'N/A') if snapshot else 'N/A',
+            'max_holding_pressure': getattr(snapshot, 'max_holding_pressure', 'N/A') if snapshot else 'N/A',
+            'vp_transfer_position': getattr(snapshot, 'vp_transfer_position', 'N/A') if snapshot else 'N/A',
             
             # 设定温度
             'barrel_temp_zone1': getattr(snapshot, 'barrel_temp_zone1', 'N/A') if snapshot else 'N/A',
@@ -1545,82 +1852,208 @@ def generate_report_from_session(session) -> str:
         },
     }
     
+    # 统计步骤状态
+    step_statuses = {}
+    for i in range(1, 8):
+        skipped = session.step_skipped.get(i, False)
+        unreasonable = not session.step_data_quality.get(i, True)
+        remark_data = session.step_remarks.get(i, {})
+        
+        step_statuses[i] = {
+            'is_skipped': skipped,
+            'is_unreasonable': unreasonable,
+            'reason': remark_data.get('reason', 'N/A'),
+            'remark': remark_data.get('remark', 'N/A'),
+            'issue': remark_data.get('data_issue', 'N/A')
+        }
+    
+    pdf_data['step_statuses'] = step_statuses
+
     # Step 1: 粘度曲线
-    if not session.step_skipped.get(1, False) and session.viscosity_data_points and len(session.viscosity_data_points) > 0:
-        visc_data = session.viscosity_data_points
-        # 检查数据格式（应该是字典列表）
-        if isinstance(visc_data, list) and len(visc_data) > 0 and isinstance(visc_data[0], dict):
-            pdf_data['viscosity'] = {
-                'speed_percents': [p.get('speed_percent', 0)/100 for p in visc_data if isinstance(p, dict)],
-                'speed_mm_s': [p.get('speed_mm_s', 0) for p in visc_data if isinstance(p, dict)],
-                'fill_times': [p.get('fill_time', 0) for p in visc_data if isinstance(p, dict)],
-                'peak_pressures': [p.get('peak_pressure', 0) for p in visc_data if isinstance(p, dict)],
-                'switch_position': visc_data[0].get('switch_position', 30) if visc_data else 30,
-                'screw_diameter': getattr(snapshot, 'screw_diameter', 53) if snapshot else 53,
-            }
+    # 即使跳过也要准备数据结构，以便生成空表或显示原因
+    visc_data = session.viscosity_data_points
+    pdf_data['viscosity'] = {
+        'speed_percents': [p.get('speed_percent', 0)/100 for p in visc_data if isinstance(p, dict)] if visc_data else [],
+        'speed_mm_s': [p.get('speed_mm_s', 0) for p in visc_data if isinstance(p, dict)] if visc_data else [],
+        'fill_times': [p.get('fill_time', 0) for p in visc_data if isinstance(p, dict)] if visc_data else [],
+        'peak_pressures': [p.get('peak_pressure', 0) for p in visc_data if isinstance(p, dict)] if visc_data else [],
+        'switch_position': visc_data[0].get('switch_position', 30) if visc_data and len(visc_data) > 0 else 30,
+        'screw_diameter': getattr(snapshot, 'screw_diameter', 53) if snapshot else 53,
+    }
     
     # Step 2: 型腔平衡
-    if not session.step_skipped.get(2, False) and session.cavity_weights:
-        # cavity_weights 是短射重量, cavity_weights_full 是满射重量
-        pdf_data['cavity_balance'] = {
-            'short_shot_weights': session.cavity_weights if isinstance(session.cavity_weights, dict) else {},
-            'vp_switch_weights': session.cavity_weights_full if isinstance(session.cavity_weights_full, dict) else {},
-            'visual_checks': session.cavity_visual_checks if hasattr(session, 'cavity_visual_checks') else {},
-        }
+    pdf_data['cavity_balance'] = {
+        'short_shot_weights': session.cavity_weights if isinstance(session.cavity_weights, dict) else {},
+        'vp_switch_weights': session.cavity_weights_full if isinstance(session.cavity_weights_full, dict) else {},
+        'visual_checks': getattr(session, 'cavity_visual_checks', {}),
+    }
     
     # Step 3: 压力降
-    if not session.step_skipped.get(3, False) and session.pressure_drop_data:
-        pdf_data['pressure_drop'] = {
-            'positions': session.pressure_drop_data.get('positions', []),
-            'pressures': session.pressure_drop_data.get('pressures', []),
-        }
+    pdf_data['pressure_drop'] = {
+        'positions': session.pressure_drop_data.get('positions', []) if session.pressure_drop_data else [],
+        'pressures': session.pressure_drop_data.get('pressures', []) if session.pressure_drop_data else [],
+    }
     
     # Step 4: 工艺窗口
-    if not session.step_skipped.get(4, False) and session.process_window_data:
-        pdf_data['process_window'] = {
-            'speeds': [p.get('temperature', 0) for p in session.process_window_data], # 注意：这里用 temperature 代替射速，因为代码中是温压窗口
-            'pressures': [p.get('holding_pressure', 0) for p in session.process_window_data],
-            'product_weights': [p.get('product_weight', 0) for p in session.process_window_data],
-            'hold_times': [8.0 for _ in session.process_window_data], # 默认为8s
-            'quality': ["Pass" if p.get('appearance_status') == 'ok' else "Fail" for p in session.process_window_data],
-        }
+    pdf_data['process_window'] = {
+        'speeds': [p.get('temperature', 0) for p in session.process_window_data] if session.process_window_data else [],
+        'pressures': [p.get('holding_pressure', 0) for p in session.process_window_data] if session.process_window_data else [],
+        'product_weights': [p.get('product_weight', 0) for p in session.process_window_data] if session.process_window_data else [],
+        'hold_times': [8.0 for _ in (session.process_window_data or [])],
+        'quality': ["Pass" if p.get('appearance_status') == 'ok' else "Fail" for p in (session.process_window_data or [])],
+    }
     
     # Step 5: 浇口冻结
-    if not session.step_skipped.get(5, False) and session.gate_seal_curve:
-        if isinstance(session.gate_seal_curve, list) and len(session.gate_seal_curve) > 0:
-            pdf_data['gate_freeze'] = {
-                'hold_times': [p.get('hold_time', 0) for p in session.gate_seal_curve if isinstance(p, dict)],
-                'weights': [p.get('weight', 0) for p in session.gate_seal_curve if isinstance(p, dict)],
-            }
+    pdf_data['gate_freeze'] = {
+        'hold_times': [p.get('hold_time', 0) for p in session.gate_seal_curve if isinstance(p, dict)] if session.gate_seal_curve else [],
+        'weights': [p.get('weight', 0) for p in session.gate_seal_curve if isinstance(p, dict)] if session.gate_seal_curve else [],
+    }
     
     # Step 6: 冷却时间
-    if not session.step_skipped.get(6, False) and session.cooling_curve:
-        if isinstance(session.cooling_curve, list) and len(session.cooling_curve) > 0:
-            pdf_data['cooling_time'] = {
-                'cooling_times': [p.get('cooling_time', 0) for p in session.cooling_curve if isinstance(p, dict)],
-                'part_temps': [p.get('part_temp', 0) for p in session.cooling_curve if isinstance(p, dict)],
-                'deformations': [p.get('deformation', 0) for p in session.cooling_curve if isinstance(p, dict)],
-            }
+    pdf_data['cooling_time'] = {
+        'cooling_times': [p.get('cooling_time', 0) for p in session.cooling_curve if isinstance(p, dict)] if session.cooling_curve else [],
+        'part_temps': [p.get('part_temp', 0) for p in session.cooling_curve if isinstance(p, dict)] if session.cooling_curve else [],
+        'deformations': [p.get('deformation', 0) for p in session.cooling_curve if isinstance(p, dict)] if session.cooling_curve else [],
+    }
     
     # Step 7: 锁模力
-    if not session.step_skipped.get(7, False) and session.clamping_force_curve:
-        if isinstance(session.clamping_force_curve, list) and len(session.clamping_force_curve) > 0:
-            pdf_data['clamping_force'] = {
-                'forces': [p.get('clamping_force', 0) for p in session.clamping_force_curve if isinstance(p, dict)],
-                'part_weights': [p.get('part_weight', 0) for p in session.clamping_force_curve if isinstance(p, dict)],
-                'flash_detected': [p.get('flash_detected', False) for p in session.clamping_force_curve if isinstance(p, dict)],
-            }
+    pdf_data['clamping_force'] = {
+        'forces': [p.get('clamping_force', 0) for p in session.clamping_force_curve if isinstance(p, dict)] if session.clamping_force_curve else [],
+        'part_weights': [p.get('part_weight', 0) for p in session.clamping_force_curve if isinstance(p, dict)] if session.clamping_force_curve else [],
+        'flash_detected': [p.get('flash_detected', False) for p in session.clamping_force_curve if isinstance(p, dict)] if session.clamping_force_curve else [],
+    }
     
-    # 生成PDF
+    # 输出PDF via the V2 generator
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_path = f"static/MIL_Report_{timestamp}.pdf"
-    
-    # 确保static目录存在
     os.makedirs('static', exist_ok=True)
-    
-    generate_mil_report_v2(pdf_data, output_path)
-    
+    output_path = f"static/Brand1_Report_{timestamp}.pdf"
+    generate_brand1_report_v2(pdf_data, output_path, session=session, external_assessment=external_assessment)
     return output_path
+
+
+def create_assessment_from_session(session) -> Dict[str, Any]:
+    """
+    根据 session 数据动态生成注塑机与模具的评估结论与建议。
+    返回结构化字典供 PDF 渲染。
+    """
+    # Collect metrics
+    snap = session.machine_snapshot
+    metrics = {}
+    metrics['lock_force'] = getattr(session, 'recommended_clamping_force', None)
+    metrics['pressure_margin'] = getattr(session, 'pressure_margin', None)
+    metrics['cavity_balance_ratio'] = getattr(session, 'cavity_balance_ratio', None)
+    metrics['gate_freeze_time'] = getattr(session, 'gate_freeze_time', None)
+    metrics['cooling_time'] = getattr(session, 'recommended_cooling_time', None)
+    metrics['optimal_speed'] = getattr(session, 'optimal_injection_speed', None)
+    metrics['machine_tonnage'] = getattr(snap, 'machine_tonnage', None) if snap else None
+    metrics['mold_issues'] = session.get_step_remarks()
+
+    # Include realtime AI assessments captured during the workflow (if any)
+    try:
+        ai_assessments = session.get_ai_assessments() if hasattr(session, 'get_ai_assessments') else {}
+    except Exception:
+        ai_assessments = {}
+
+    # Heuristics thresholds (engineering judgment)
+    conclusions = []
+    actions = []
+    risks = []
+
+    # Locking force check
+    if metrics['lock_force'] is None:
+        conclusions.append('锁模力未测得：需在步骤7确认锁模力是否满足额定要求。')
+        risks.append('锁模力未知可能导致成型过程中飞边或脱模问题。')
+    else:
+        # If machine tonnage provided, do rough check: require lock_force >= 0.9 * tonnage
+        try:
+            if metrics['machine_tonnage'] and float(metrics['lock_force']) < 0.9 * float(metrics['machine_tonnage']):
+                conclusions.append('锁模力偏低：当前建议锁模力低于机台额定吨位的90%，建议检修或调整锁模系统。')
+                actions.append('检查液压系统与锁模缸，必要时更换密封件或调校油压。')
+            else:
+                conclusions.append('锁模力满足要求或接近额定值。')
+        except Exception:
+            conclusions.append('锁模力无法比对额定吨位，但已记录具体值，建议人工复核。')
+
+    # Pressure margin
+    if metrics['pressure_margin'] is None:
+        conclusions.append('压力裕度未计算：步骤3需要补充压力分布数据以评估保压裕度。')
+    else:
+        if float(metrics['pressure_margin']) < 3.0:
+            conclusions.append('压力裕度较小：保压/注射压力接近限制，可能影响成型稳定性。')
+            actions.append('评估保压曲线并考虑提高安全裕量或降低注射速度。')
+        else:
+            conclusions.append('压力裕度正常。')
+
+    # Cavity balance
+    if metrics['cavity_balance_ratio'] is None:
+        conclusions.append('型腔平衡数据缺失：建议在步骤2补测短射与满射数据。')
+    else:
+        ratio = float(metrics['cavity_balance_ratio'])
+        if abs(ratio - 1.0) <= 0.05:
+            conclusions.append('型腔平衡良好。')
+        else:
+            conclusions.append('型腔平衡偏差显著：存在单穴或多穴重量差异，需调整流道或门口。')
+            actions.append('针对不平衡的穴位进行局部修磨或调整浇口/阀门。')
+
+    # Gate freeze time
+    if metrics['gate_freeze_time'] is None:
+        conclusions.append('浇口冻结时间未记录，建议按步骤5补测以确定最小保压时间。')
+    else:
+        if float(metrics['gate_freeze_time']) <= 0 or float(metrics['gate_freeze_time']) > 30:
+            conclusions.append('浇口冻结时间异常：可能存在流动/冷却问题，建议检查冷却与浇口几何。')
+            actions.append('清理浇口、检查冷却通道并复测冻结时间。')
+        else:
+            conclusions.append('浇口冻结时间在合理范围。')
+
+    # Cooling time
+    if metrics['cooling_time'] is None:
+        conclusions.append('冷却时间建议未生成，步骤6需提供冷却曲线与翘曲数据以确定可靠冷却时间。')
+    else:
+        if float(metrics['cooling_time']) > 60:
+            conclusions.append('冷却时间过长：可能影响产能，建议优化冷却系统或模具冷却通道。')
+            actions.append('检查冷却通道通水性并考虑增加冷却流量或改进冷却设计。')
+        else:
+            conclusions.append('冷却时间合理。')
+
+    # Aggregate risk level
+    high_risk_conditions = [c for c in conclusions if '偏低' in c or '异常' in c or '缺失' in c or '显著' in c]
+    if len(high_risk_conditions) >= 2:
+        overall = '建议修模/检修后复验（中高风险）'
+    elif len(high_risk_conditions) == 1:
+        overall = '可先局部修正并验证（中等风险）'
+    else:
+        overall = '满足试生产条件（低风险）'
+
+    # Build ai_comments structure for PDF rendering
+    ai_comments: List[Dict[str, Any]] = []
+    if isinstance(ai_assessments, dict):
+        for step, payload in sorted(ai_assessments.items(), key=lambda x: x[0]):
+            try:
+                raw = payload.get('assessment') or {}
+            except Exception:
+                raw = {}
+            ai_comments.append({
+                'step': step,
+                'provider': payload.get('provider'),
+                'timestamp': payload.get('timestamp'),
+                'overall': raw.get('overall') or raw.get('conclusion') or '',
+                'conclusions': raw.get('conclusions') if isinstance(raw.get('conclusions'), list) else [],
+                'actions': raw.get('actions') if isinstance(raw.get('actions'), list) else [],
+                'risks': raw.get('risks') if isinstance(raw.get('risks'), list) else [],
+                'missing_key_data': raw.get('missing_key_data') if isinstance(raw.get('missing_key_data'), list) else [],
+            })
+
+    # Build assessment dict
+    assessment = {
+        'metrics': metrics,
+        'conclusions': conclusions,
+        'actions': actions,
+        'risks': risks,
+        'overall': overall,
+        'ai_comments': ai_comments,
+    }
+    return assessment
+
 
 
 # ========================================================================
@@ -1704,8 +2137,8 @@ if __name__ == "__main__":
     }
     
     # 生成PDF
-    output_file = "MIL_Report_V2_Test.pdf"
-    generate_mil_report_v2(pdf_data, output_file)
+    output_file = "Brand1_Report_V2_Test.pdf"
+    generate_brand1_report_v2(pdf_data, output_file)
     
-    print(f"✓ PDF报告已生成: {output_file}")
+    print(f"[OK] PDF报告已生成: {output_file}")
     print(f"  文件大小: {os.path.getsize(output_file):,} 字节")

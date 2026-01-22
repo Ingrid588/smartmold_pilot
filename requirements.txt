@@ -1,0 +1,3 @@
+fpdf2>=2.8
+reportlab>=4.4
+# Optional: weasyprint requires system libraries (cairo, pango). Install separately if needed.

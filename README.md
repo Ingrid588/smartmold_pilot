@@ -50,7 +50,7 @@ Or directly:
 /Users/a/SmartMold_Pilot/.venv/bin/python3 -m nicegui main.py
 ```
 
-The application will start on **http://localhost:8080**
+The application will start on **http://localhost:9091**
 
 ---
 

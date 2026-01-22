@@ -23,8 +23,8 @@ fi
 # Run the application
 echo "🚀 Starting SmartMold Pilot V3..."
 echo ""
-echo "App will be available at: http://localhost:8080"
+echo "App will be available at: http://localhost:9091"
 echo "Press Ctrl+C to stop the application."
 echo ""
 
-/Users/a/SmartMold_Pilot/.venv/bin/python3 -m nicegui main.py
+/Users/aaa/SmartMold_Pilot/.venv/bin/python3 main.py

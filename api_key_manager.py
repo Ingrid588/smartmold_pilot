@@ -73,19 +73,21 @@ def test_provider_key(provider: str, key: str, timeout: int = 8) -> Tuple[bool, 
             return False, f'Claude returned HTTP {r.status_code}: {r.text[:200]}'
 
         if provider == 'deepseek':
-            # Deepseek API schemas vary; attempt a basic GET to a likely endpoint
-            url = 'https://api.deepseek.ai/v1/models'
-            headers = {'Authorization': f'Bearer {key}'}
-            r = requests.get(url, headers=headers, timeout=timeout)
-            if r.status_code in (200, 401, 403):
-                # treat 200 as success. 401/403 means key rejected but endpoint reachable.
-                if r.status_code == 200:
-                    try:
-                        _ = r.json()
-                        return True, 'Deepseek key validated (models endpoint)'
-                    except Exception:
-                        return False, 'Deepseek responded but returned non-JSON'
-                return False, f'Deepseek returned HTTP {r.status_code}: {r.text[:200]}'
+            # Deepseek API uses chat completions endpoint for testing
+            url = 'https://api.deepseek.com/v1/chat/completions'
+            headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
+            body = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 5,
+            }
+            r = requests.post(url, headers=headers, json=body, timeout=timeout)
+            if r.status_code == 200:
+                try:
+                    _ = r.json()
+                    return True, 'Deepseek key validated (chat completions)'
+                except Exception:
+                    return False, 'Deepseek responded but returned non-JSON'
             return False, f'Deepseek returned HTTP {r.status_code}: {r.text[:200]}'
 
         return False, f'Unknown provider: {provider}'
