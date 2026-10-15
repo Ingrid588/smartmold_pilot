@@ -30,9 +30,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files — never commit secrets
-.env
-.env.*
+# Keep committed .env as empty key slots the app loads.
+# Do not put real keys in git. Use local overrides if needed.
+.env.local
+.env.*.local
 
 # vercel
 .vercel
