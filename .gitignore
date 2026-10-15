@@ -30,9 +30,8 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (WARNING: .env contains API keys - only commit with empty values)
-# Uncomment below to stop tracking .env:
-# .env
+# env files — never commit secrets
+.env
 .env.*
 
 # vercel
